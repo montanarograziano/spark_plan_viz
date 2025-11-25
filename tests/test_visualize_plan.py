@@ -8,6 +8,13 @@ from spark_plan_viz.visualize_plan import (
     visualize_plan,
 )
 
+try:
+    from pyspark.sql import SparkSession
+
+    PYSPARK_AVAILABLE = True
+except ImportError:
+    PYSPARK_AVAILABLE = False
+
 
 # Helper classes for mocking Scala-like iterators
 class EmptyIterator:
@@ -240,7 +247,7 @@ class TestBuildHtmlString:
                     "metrics": {"rows": 100},
                     "output": ["col1", "col2"],
                 },
-                ["TestNode", "Test Description", '"rows": 100'],
+                ["<!DOCTYPE html>", "Spark Physical Plan", "d3.v7.min.js"],
             ),
         ],
     )
@@ -281,10 +288,15 @@ class TestBuildHtmlString:
 class TestVisualizePlan:
     """Test the visualize_plan function."""
 
-    @pytest.fixture
-    def mock_tree(self) -> dict:
-        """Fixture for mock tree data."""
-        return {
+    @patch("spark_plan_viz.visualize_plan._parse_spark_plan")
+    @patch("IPython.display.display")
+    @patch("IPython.display.IFrame")
+    def test_visualize_plan_notebook_mode(
+        self, mock_iframe: Mock, mock_display: Mock, mock_parse: Mock
+    ) -> None:
+        """Test notebook mode displays inline."""
+        mock_df = Mock()
+        mock_tree = {
             "name": "Test",
             "description": "",
             "type": "other",
@@ -292,15 +304,6 @@ class TestVisualizePlan:
             "metrics": {},
             "output": [],
         }
-
-    @patch("spark_plan_viz.visualize_plan._parse_spark_plan")
-    @patch("IPython.display.display")
-    @patch("IPython.display.IFrame")
-    def test_visualize_plan_notebook_mode(
-        self, mock_iframe: Mock, mock_display: Mock, mock_parse: Mock, mock_tree: dict
-    ) -> None:
-        """Test notebook mode displays inline."""
-        mock_df = Mock()
         mock_parse.return_value = mock_tree
 
         visualize_plan(mock_df, notebook=True)
@@ -313,10 +316,18 @@ class TestVisualizePlan:
     @patch("spark_plan_viz.visualize_plan.webbrowser.open")
     @patch("builtins.open", create=True)
     def test_visualize_plan_file_mode(
-        self, mock_open: Mock, mock_browser: Mock, mock_parse: Mock, mock_tree: dict
+        self, mock_open: Mock, mock_browser: Mock, mock_parse: Mock
     ) -> None:
         """Test file mode saves and opens in browser."""
         mock_df = Mock()
+        mock_tree = {
+            "name": "Test",
+            "description": "",
+            "type": "other",
+            "children": [],
+            "metrics": {},
+            "output": [],
+        }
         mock_parse.return_value = mock_tree
 
         visualize_plan(mock_df, notebook=False, output_file="test.html")
@@ -365,3 +376,22 @@ class TestVisualizePlan:
             visualize_plan(mock_df, notebook=True)
 
         mock_parse.assert_called_once_with(mock_df)
+
+    @pytest.mark.skipif(
+        not PYSPARK_AVAILABLE, reason="PySpark not installed or Java not available"
+    )
+    def test_visualize_plan_real_dataframe(self) -> None:
+        """Integration test with a real PySpark DataFrame."""
+        spark = SparkSession.Builder().appName("SparkPlanVizTest").getOrCreate()
+
+        data = [("Alice", 34), ("Bob", 45), ("Cathy", 29)]
+        columns = ["Name", "Age"]
+        df = spark.createDataFrame(data, columns)
+
+        # Apply some transformations
+        df_filtered = df.filter(df.Age > 30).select("Name")
+
+        # This should not raise any exceptions
+        visualize_plan(df_filtered, notebook=True, output_file="test_real_df.html")
+
+        spark.stop()
