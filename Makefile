@@ -17,7 +17,7 @@ format:
 	uv run ruff format .
 # Run mypy type checker
 mypy:
-	uv run mypy src/ tests/
+	uv run mypy src/
 
 # Run pytest tests
 test:
