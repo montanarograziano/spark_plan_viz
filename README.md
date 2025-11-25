@@ -46,6 +46,6 @@ visualize_plan(df, output_file="my_query_plan.html", open_browser=True)
 
 ## Example visualization
 
-![Spark Plan Visualization](notebooks/example.html)
+Here's an example screenshot of the visualization
 
-You can view a live example [here](notebooks/example.html).
+![example visualization](<docs/example.jpg>)
