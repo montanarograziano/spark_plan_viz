@@ -43,5 +43,9 @@ warn_unused_ignores = true
 disallow_untyped_calls = false
 untyped_calls_exclude = ""
 
+[[tool.mypy.overrides]]
+module = "py4j.*"
+ignore_missing_imports = true
+
 [tool.uv]
 package = true

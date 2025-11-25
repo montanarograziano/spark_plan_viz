@@ -3,10 +3,13 @@ import json
 import os
 import webbrowser
 from importlib.resources import files
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from py4j.java_gateway import JavaObject
+from pyspark.sql import DataFrame
 
 
-def _parse_spark_plan(df: Any) -> Optional[Dict[str, Any]]:
+def _parse_spark_plan(df: DataFrame) -> dict[str, Any] | None:
     """
     Traverses the internal JVM SparkPlan object using Py4J.
     Designed for Spark 3.x+ with Adaptive Query Execution (AQE) support.
@@ -14,16 +17,16 @@ def _parse_spark_plan(df: Any) -> Optional[Dict[str, Any]]:
     """
     try:
         # Access the JVM Physical Plan directly
-        plan = df._jdf.queryExecution().executedPlan()  # pyright: ignore[reportOptionalCall]
+        plan: JavaObject = df._jdf.queryExecution().executedPlan()  # pyright: ignore[reportOptionalCall]
     except AttributeError:
         print(
             "Error: Could not access the execution plan. Ensure this is a PySpark DataFrame."
         )
         return None
 
-    def _get_metric_values(node: Any) -> Dict[str, Any]:
+    def _get_metric_values(node: Any) -> dict[str, Any]:
         # Extract SQL metrics (Spark 3+ SQLMetric objects)
-        metrics: Dict[str, Any] = {}
+        metrics: dict[str, Any] = {}
         try:
             metric_map = node.metrics()
             iterator = metric_map.iterator()
@@ -40,9 +43,10 @@ def _parse_spark_plan(df: Any) -> Optional[Dict[str, Any]]:
             pass
         return metrics
 
-    def _get_output_info(node: Any) -> List[str]:
+    def _get_output_info(node: JavaObject) -> list[str]:
         """Extracts the output attributes (columns) of the node."""
-        outputs: List[str] = []
+        outputs: list[str] = []
+        node.outpu
         try:
             # node.output() returns a Seq[Attribute]
             iterator = node.output().iterator()
@@ -53,7 +57,7 @@ def _parse_spark_plan(df: Any) -> Optional[Dict[str, Any]]:
             pass
         return outputs
 
-    def _walk_node(node: Any) -> Dict[str, Any]:
+    def _walk_node(node: JavaObject) -> dict[str, Any]:
         name = node.nodeName()
 
         # Spark 3+ prefer verboseStringWithSuffix for explain-like details
@@ -89,7 +93,7 @@ def _parse_spark_plan(df: Any) -> Optional[Dict[str, Any]]:
         elif "Union" in name:
             node_type = "union"
 
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "name": name,
             "description": description,
             "output": _get_output_info(node),
@@ -99,7 +103,7 @@ def _parse_spark_plan(df: Any) -> Optional[Dict[str, Any]]:
         }
 
         # --- Spark 3+ AQE & Traversal Logic ---
-        children_nodes: List[Any] = []
+        children_nodes: list[Any] = []
 
         try:
             # 1. Handle AdaptiveSparkPlan (AQE Root)
@@ -144,7 +148,7 @@ def _parse_spark_plan(df: Any) -> Optional[Dict[str, Any]]:
     return _walk_node(plan)
 
 
-def _build_html_string(tree_data: Dict[str, Any]) -> str:
+def _build_html_string(tree_data: dict[str, Any]) -> str:
     """
     Injects the tree data into a D3.js HTML template and returns the HTML string.
     """
@@ -160,7 +164,7 @@ def _build_html_string(tree_data: Dict[str, Any]) -> str:
 
 
 def visualize_plan(
-    df: Any,
+    df: DataFrame,
     notebook: bool = True,
     output_file: str = "spark_plan_viz.html",
 ) -> None:
