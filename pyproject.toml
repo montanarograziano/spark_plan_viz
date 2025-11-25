@@ -18,6 +18,7 @@ packages = ["src/spark_plan_viz"]
 
 [dependency-groups]
 dev = [
+    "ipykernel>=7.1.0",
     "mypy>=1.18.2",
     "prek>=0.2.18",
     "pyspark==3.5.6",
