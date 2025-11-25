@@ -15,7 +15,7 @@ def _parse_spark_plan(df: DataFrame) -> Optional[Dict[str, Any]]:
     """
     try:
         # Access the JVM Physical Plan directly
-        plan = df._jdf.queryExecution().executedPlan()
+        plan = df._jdf.queryExecution().executedPlan()  # pyright: ignore[reportOptionalCall]
     except AttributeError:
         print(
             "Error: Could not access the execution plan. Ensure this is a PySpark DataFrame."
