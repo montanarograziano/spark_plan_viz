@@ -17,6 +17,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup just
+        uses: extractions/setup-just@v3
+
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
@@ -24,16 +27,10 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: make install
+        run: just install
 
-      - name: Run ruff check
-        run: uv run ruff check .
-
-      - name: Run ruff format check
-        run: uv run ruff format --check .
-
-      - name: Run mypy
-        run: uv run mypy src
+      - name: Run checks
+        run: just check
 
       - name: Run pytest
-        run: uv run pytest tests/ -v
+        run: just test
