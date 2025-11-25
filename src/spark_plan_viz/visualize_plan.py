@@ -495,7 +495,7 @@ def visualize_plan(
                 )
                 data_uri = f"data:text/html;base64,{b64_html}"
 
-                display(IFrame(src=data_uri, width="100%", height=800))  # type: ignore[no-untyped-call]
+                display(IFrame(src=data_uri, width="100%", height=800))
 
             except ImportError:
                 print("Error: IPython is not installed. Cannot display inline.")
