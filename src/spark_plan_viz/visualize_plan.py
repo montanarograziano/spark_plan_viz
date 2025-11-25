@@ -154,7 +154,7 @@ def _build_html_string(tree_data: Dict[str, Any]) -> str:
 
     # Replace the placeholder with actual JSON data
     json_data = json.dumps(tree_data)
-    html_content = template_content.replace("{{TREE_DATA}}", json_data)
+    html_content = template_content.replace("{{ TREE_DATA }}", json_data)
 
     return html_content
 

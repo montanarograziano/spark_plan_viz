@@ -43,3 +43,9 @@ visualize_plan(df, output_file="my_query_plan.html", open_browser=True)
 - **Purple Nodes**: Joins
 - **Green Nodes**: Scans (Data Ingestion)
 - **Blue Nodes**: Aggregations
+
+## Example visualization
+
+![Spark Plan Visualization](notebooks/example.html)
+
+You can view a live example [here](notebooks/example.html).
