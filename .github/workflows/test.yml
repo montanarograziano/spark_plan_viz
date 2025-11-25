@@ -24,7 +24,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: make install
 
       - name: Run ruff check
         run: uv run ruff check .
