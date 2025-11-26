@@ -1,0 +1,122 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us fix it.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Create a DataFrame with...
+        2. Call visualize_plan()...
+        3. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: The visualization should show...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: Instead, I see...
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Code Sample
+      description: Please provide a minimal code example that reproduces the issue
+      render: python
+      placeholder: |
+        from pyspark.sql import SparkSession
+        from spark_plan_viz import visualize_plan
+
+        # Your code here
+    validations:
+      required: false
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error Message / Stack Trace
+      description: If applicable, paste the full error message or stack trace
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: spark-plan-viz Version
+      description: What version of spark-plan-viz are you using?
+      placeholder: e.g., 1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: spark-version
+    attributes:
+      label: PySpark Version
+      description: What version of PySpark are you using?
+      placeholder: e.g., 3.5.0
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: What version of Python are you using?
+      placeholder: e.g., 3.11.5
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Where are you running this?
+      options:
+        - Jupyter Notebook
+        - JupyterLab
+        - Databricks
+        - Google Colab
+        - Python Script
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here
+      placeholder: Screenshots, workarounds, related issues, etc.
+    validations:
+      required: false
