@@ -10,8 +10,15 @@ permissions:
   id-token: write
 
 jobs:
+  # Step 1: Run tests first
+  test:
+    name: Run Tests
+    uses: ./.github/workflows/test.yml
+
+  # Step 2: Generate changelog after tests pass
   generate-changelog:
     name: Generate Changelog
+    needs: test
     runs-on: ubuntu-latest
     outputs:
       release_body: ${{ steps.git-cliff.outputs.content }}
@@ -22,7 +29,7 @@ jobs:
           fetch-depth: 0
 
       - name: Generate changelog
-        uses: orhun/git-cliff-action@v3
+        uses: orhun/git-cliff-action@v4.6.0
         id: git-cliff
         with:
           config: cliff.toml
@@ -36,6 +43,7 @@ jobs:
           name: changelog
           path: CHANGES.md
 
+  # Step 3: Create GitHub release after changelog generation
   create-release:
     name: Create GitHub Release
     needs: generate-changelog
@@ -58,26 +66,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Step 4: Publish to PyPI after GitHub release is created
   publish-to-pypi:
     name: Publish to PyPI
     needs: create-release
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
 
       - name: Build package
         run: uv build
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          verbose: true
+        run: uv publish

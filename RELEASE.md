@@ -22,10 +22,37 @@ This project uses automated releases via GitHub Actions.
 
 3. **Automated workflow**:
    - The `release.yml` GitHub Action will trigger automatically
-   - It will:
-     1. Generate a changelog from conventional commits using git-cliff
-     2. Create a GitHub Release with the changelog
-     3. Build and publish the package to PyPI
+   - It will execute the following steps in order:
+     1. **Run Tests**: Execute the full test suite on Python 3.11, 3.12, and 3.13
+     2. **Generate Changelog**: Create changelog from conventional commits using git-cliff
+     3. **Create GitHub Release**: Publish a GitHub Release with the generated changelog
+     4. **Publish to PyPI**: Build and publish the package to PyPI
+
+   If any step fails, the workflow stops and subsequent steps are not executed.
+
+   ```
+   Push Tag (v*.*.*)
+         ↓
+   ┌─────────────────┐
+   │  Run Tests      │ ← Reuses test.yml workflow
+   │  (3.11-3.13)    │
+   └────────┬────────┘
+            ↓ (on success)
+   ┌─────────────────┐
+   │  Generate       │ ← git-cliff from conventional commits
+   │  Changelog      │
+   └────────┬────────┘
+            ↓ (on success)
+   ┌─────────────────┐
+   │  Create GitHub  │ ← GitHub Release with changelog
+   │  Release        │
+   └────────┬────────┘
+            ↓ (on success)
+   ┌─────────────────┐
+   │  Publish to     │ ← uv build + uv publish
+   │  PyPI           │
+   └─────────────────┘
+   ```
 
 ## Conventional Commit Types
 
