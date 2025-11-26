@@ -3,7 +3,7 @@ name = "spark-plan-viz"
 dynamic = ["version"]
 description = "A tool to visualize Apache Spark execution plans."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = ["ipython>=9.7.0"]
 
 [build-system]
@@ -24,6 +24,7 @@ packages = ["src/spark_plan_viz"]
 
 [dependency-groups]
 dev = [
+    "git-cliff>=2.10.1",
     "ipykernel>=7.1.0",
     "mypy>=1.18.2",
     "prek>=0.2.18",
@@ -33,7 +34,7 @@ dev = [
 ]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 exclude = [".venv", "scripts", "docs", "tests"]
 files = "**/*.py"
 show_error_codes = true
