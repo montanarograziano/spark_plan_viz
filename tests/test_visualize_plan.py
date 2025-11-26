@@ -382,16 +382,53 @@ class TestVisualizePlan:
     )
     def test_visualize_plan_real_dataframe(self) -> None:
         """Integration test with a real PySpark DataFrame."""
+
         spark = SparkSession.Builder().appName("SparkPlanVizTest").getOrCreate()
+        # Create sample data
+        employees_data = [
+            (1, "Alice", 34, "Engineering"),
+            (2, "Bob", 45, "Sales"),
+            (3, "Cathy", 29, "Engineering"),
+            (4, "David", 38, "Marketing"),
+            (5, "Eve", 42, "Sales"),
+        ]
+        employees_columns = ["id", "name", "age", "department"]
+        employees_df = spark.createDataFrame(employees_data, employees_columns)
 
-        data = [("Alice", 34), ("Bob", 45), ("Cathy", 29)]
-        columns = ["Name", "Age"]
-        df = spark.createDataFrame(data, columns)
+        salaries_data = [
+            (1, 95000),
+            (2, 85000),
+            (3, 78000),
+            (4, 72000),
+            (5, 88000),
+        ]
+        salaries_columns = ["emp_id", "salary"]
+        salaries_df = spark.createDataFrame(salaries_data, salaries_columns)
 
-        # Apply some transformations
-        df_filtered = df.filter(df.Age > 30).select("Name")
+        departments_data = [
+            ("Engineering", "Tech"),
+            ("Sales", "Business"),
+            ("Marketing", "Business"),
+        ]
+        departments_columns = ["dept_name", "division"]
+        departments_df = spark.createDataFrame(departments_data, departments_columns)
+
+        # Apply complex transformations with joins, filters, and aggregations
+        result_df = (
+            employees_df.filter(employees_df.age > 30)
+            .join(salaries_df, employees_df.id == salaries_df.emp_id, "inner")
+            .join(
+                departments_df,
+                employees_df.department == departments_df.dept_name,
+                "left",
+            )
+            .filter(salaries_df.salary > 80000)
+            .groupBy("division")
+            .agg({"salary": "avg", "age": "max"})
+            .sort("division")
+        )
 
         # This should not raise any exceptions
-        visualize_plan(df_filtered, notebook=True, output_file="test_real_df.html")
+        visualize_plan(result_df, notebook=True, output_file="test_real_df.html")
 
         spark.stop()

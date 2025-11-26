@@ -48,4 +48,4 @@ visualize_plan(df, output_file="my_query_plan.html", open_browser=True)
 
 Here's an example screenshot of the visualization
 
-![example visualization](<docs/example.jpg>)
+![example visualization](<docs/example.jpeg>)

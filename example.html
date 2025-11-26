@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Spark Physical Plan</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f4f6f8;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #header {
+            padding: 10px 20px;
+            border-bottom: 1px solid #ddd;
+            background: #fff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        h2 {
+            margin: 0;
+            color: #333;
+            font-size: 18px;
+        }
+
+        .legend {
+            font-size: 12px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        #main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+
+        #tree-container {
+            flex: 1;
+            height: 100%;
+            background: white;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        #tree-container:active {
+            cursor: grabbing;
+        }
+
+        /* Details Panel (replaces Tooltip) */
+        #details-panel {
+            width: 400px;
+            background: #fff;
+            border-left: 1px solid #ddd;
+            padding: 20px;
+            overflow-y: auto;
+            display: none;
+            /* Hidden by default */
+            flex-shrink: 0;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.05);
+            position: relative;
+            z-index: 20;
+        }
+
+        #details-panel.visible {
+            display: block;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .panel-header h3 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 16px;
+        }
+
+        .close-btn {
+            cursor: pointer;
+            color: #999;
+            font-size: 20px;
+            line-height: 1;
+            border: none;
+            background: none;
+        }
+
+        .close-btn:hover {
+            color: #333;
+        }
+
+        .details-section {
+            margin-bottom: 15px;
+        }
+
+        .details-label {
+            color: #7f8c8d;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .details-content {
+            font-family: "Consolas", "Monaco", monospace;
+            font-size: 12px;
+            color: #34495e;
+            white-space: pre-wrap;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+
+        /* Node Styling */
+        .node rect {
+            fill: #fff;
+            stroke: steelblue;
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: all 0.2s;
+            rx: 5px;
+            ry: 5px;
+        }
+
+        .node rect:hover {
+            stroke-width: 3px;
+            filter: brightness(0.95);
+        }
+
+        .node.selected rect {
+            stroke: #333 !important;
+            stroke-width: 3px;
+        }
+
+        .node text {
+            font: 11px sans-serif;
+            pointer-events: none;
+            fill: #333;
+        }
+
+        .node .node-title {
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .node .node-detail {
+            font-size: 10px;
+            fill: #666;
+        }
+
+        .link {
+            fill: none;
+            stroke: #ccc;
+            stroke-width: 1.5px;
+            opacity: 0.6;
+            marker-end: url(#arrowhead);
+        }
+
+        /* Node Type Colors */
+        .node.shuffle rect {
+            stroke: #e74c3c;
+            fill: #fadbd8;
+        }
+
+        .node.scan rect {
+            stroke: #27ae60;
+            fill: #d5f5e3;
+        }
+
+        .node.join rect {
+            stroke: #8e44ad;
+            fill: #ebdef0;
+        }
+
+        .node.filter rect {
+            stroke: #f39c12;
+            fill: #fdebd0;
+        }
+
+        .node.aggregate rect {
+            stroke: #2980b9;
+            fill: #d6eaf8;
+        }
+
+        .node.sort rect {
+            stroke: #d35400;
+            fill: #edbb99;
+        }
+
+        .node.project rect {
+            stroke: #7f8c8d;
+            fill: #eaeded;
+        }
+
+        .node.window rect {
+            stroke: #16a085;
+            fill: #a2d9ce;
+        }
+
+        .node.union rect {
+            stroke: #2c3e50;
+            fill: #abb2b9;
+        }
+
+        /* Controls */
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 5;
+        }
+
+        .btn {
+            background: white;
+            border: 1px solid #ccc;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn:hover {
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="header">
+        <h2>Spark Physical Plan</h2>
+        <div class="legend">
+            <div class="legend-item">
+                <div class="dot" style="background: #e74c3c"></div> Exchange
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: #8e44ad"></div> Join
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: #27ae60"></div> Scan
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: #f39c12"></div> Filter
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: #2980b9"></div> Agg
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: #d35400"></div> Sort
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: #16a085"></div> Window
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: #7f8c8d"></div> Project
+            </div>
+        </div>
+    </div>
+
+    <div id="main-container">
+        <div id="tree-container"></div>
+        <div id="details-panel">
+            <div class="panel-header">
+                <h3 id="panel-title">Node Details</h3>
+                <button class="close-btn" onclick="closePanel()">×</button>
+            </div>
+            <div id="panel-content"></div>
+        </div>
+
+        <div class="controls">
+            <button class="btn" onclick="zoomIn()" title="Zoom In">+</button>
+            <button class="btn" onclick="zoomOut()" title="Zoom Out">-</button>
+            <button class="btn" onclick="resetZoom()" title="Reset View">⟲</button>
+        </div>
+    </div>
+
+    <!-- Load D3.js from CDN -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        const treeData = {"name": "AdaptiveSparkPlan", "description": "AdaptiveSparkPlan isFinalPlan=false\n+- Sort [total_revenue#135 DESC NULLS LAST, category#78 ASC NULLS FIRST], true, 0\n   +- Exchange rangepartitioning(total_revenue#135 DESC NULLS LAST, category#78 ASC NULLS FIRST, 200), ENSURE_REQUIREMENTS, [plan_id=84]\n      +- Filter (isnotnull(total_revenue#135) AND (total_revenue#135 > 1000.0))\n         +- HashAggregate(keys=[category#78, city#93], functions=[sum((cast(quantity#85L as double) * price#77)), count(sale_id#83L), avg(price#77)], output=[category#78, city#93, total_revenue#135, num_sales#137L, avg_price#139])\n            +- Exchange hashpartitioning(category#78, city#93, 200), ENSURE_REQUIREMENTS, [plan_id=80]\n               +- HashAggregate(keys=[category#78, city#93], functions=[partial_sum((cast(quantity#85L as double) * price#77)), partial_count(sale_id#83L), partial_avg(price#77)], output=[category#78, city#93, sum#154, count#155L, sum#156, count#157L])\n                  +- Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n                     +- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n                        :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n                        :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n                        :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n                        :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n                        :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n                        :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n                        :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n                        :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n                        :              +- Project [product_id#75L, price#77, category#78]\n                        :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n                        :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n                        +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n                           +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n                              +- Project [customer_id#91L, city#93]\n                                 +- Filter isnotnull(customer_id#91L)\n                                    +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["category#78", "city#93", "total_revenue#135", "num_sales#137L", "avg_price#139"], "type": "other", "key_info": {}, "children": [{"name": "Sort", "description": "Sort [total_revenue#135 DESC NULLS LAST, category#78 ASC NULLS FIRST], true, 0\n+- Exchange rangepartitioning(total_revenue#135 DESC NULLS LAST, category#78 ASC NULLS FIRST, 200), ENSURE_REQUIREMENTS, [plan_id=84]\n   +- Filter (isnotnull(total_revenue#135) AND (total_revenue#135 > 1000.0))\n      +- HashAggregate(keys=[category#78, city#93], functions=[sum((cast(quantity#85L as double) * price#77)), count(sale_id#83L), avg(price#77)], output=[category#78, city#93, total_revenue#135, num_sales#137L, avg_price#139])\n         +- Exchange hashpartitioning(category#78, city#93, 200), ENSURE_REQUIREMENTS, [plan_id=80]\n            +- HashAggregate(keys=[category#78, city#93], functions=[partial_sum((cast(quantity#85L as double) * price#77)), partial_count(sale_id#83L), partial_avg(price#77)], output=[category#78, city#93, sum#154, count#155L, sum#156, count#157L])\n               +- Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n                  +- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n                     :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n                     :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n                     :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n                     :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n                     :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n                     :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n                     :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n                     :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n                     :              +- Project [product_id#75L, price#77, category#78]\n                     :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n                     :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n                     +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n                        +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n                           +- Project [customer_id#91L, city#93]\n                              +- Filter isnotnull(customer_id#91L)\n                                 +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["category#78", "city#93", "total_revenue#135", "num_sales#137L", "avg_price#139"], "type": "sort", "key_info": {"order": "total_revenue DESC"}, "children": [{"name": "Exchange", "description": "Exchange rangepartitioning(total_revenue#135 DESC NULLS LAST, category#78 ASC NULLS FIRST, 200), ENSURE_REQUIREMENTS, [plan_id=84]\n+- Filter (isnotnull(total_revenue#135) AND (total_revenue#135 > 1000.0))\n   +- HashAggregate(keys=[category#78, city#93], functions=[sum((cast(quantity#85L as double) * price#77)), count(sale_id#83L), avg(price#77)], output=[category#78, city#93, total_revenue#135, num_sales#137L, avg_price#139])\n      +- Exchange hashpartitioning(category#78, city#93, 200), ENSURE_REQUIREMENTS, [plan_id=80]\n         +- HashAggregate(keys=[category#78, city#93], functions=[partial_sum((cast(quantity#85L as double) * price#77)), partial_count(sale_id#83L), partial_avg(price#77)], output=[category#78, city#93, sum#154, count#155L, sum#156, count#157L])\n            +- Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n               +- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n                  :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n                  :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n                  :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n                  :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n                  :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n                  :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n                  :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n                  :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n                  :              +- Project [product_id#75L, price#77, category#78]\n                  :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n                  :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n                  +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n                     +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n                        +- Project [customer_id#91L, city#93]\n                           +- Filter isnotnull(customer_id#91L)\n                              +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["category#78", "city#93", "total_revenue#135", "num_sales#137L", "avg_price#139"], "type": "shuffle", "key_info": {"shuffle_type": "Range", "is_shuffle": true}, "children": [{"name": "Filter", "description": "Filter (isnotnull(total_revenue#135) AND (total_revenue#135 > 1000.0))\n+- HashAggregate(keys=[category#78, city#93], functions=[sum((cast(quantity#85L as double) * price#77)), count(sale_id#83L), avg(price#77)], output=[category#78, city#93, total_revenue#135, num_sales#137L, avg_price#139])\n   +- Exchange hashpartitioning(category#78, city#93, 200), ENSURE_REQUIREMENTS, [plan_id=80]\n      +- HashAggregate(keys=[category#78, city#93], functions=[partial_sum((cast(quantity#85L as double) * price#77)), partial_count(sale_id#83L), partial_avg(price#77)], output=[category#78, city#93, sum#154, count#155L, sum#156, count#157L])\n         +- Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n            +- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n               :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n               :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n               :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n               :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n               :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n               :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n               :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n               :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n               :              +- Project [product_id#75L, price#77, category#78]\n               :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n               :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n               +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n                  +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n                     +- Project [customer_id#91L, city#93]\n                        +- Filter isnotnull(customer_id#91L)\n                           +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["category#78", "city#93", "total_revenue#135", "num_sales#137L", "avg_price#139"], "type": "filter", "key_info": {"condition": "(isnotnull(total_revenue#135) AND (total_revenue#135 > 1000.0))"}, "children": [{"name": "HashAggregate", "description": "HashAggregate(keys=[category#78, city#93], functions=[sum((cast(quantity#85L as double) * price#77)), count(sale_id#83L), avg(price#77)], output=[category#78, city#93, total_revenue#135, num_sales#137L, avg_price#139])\n+- Exchange hashpartitioning(category#78, city#93, 200), ENSURE_REQUIREMENTS, [plan_id=80]\n   +- HashAggregate(keys=[category#78, city#93], functions=[partial_sum((cast(quantity#85L as double) * price#77)), partial_count(sale_id#83L), partial_avg(price#77)], output=[category#78, city#93, sum#154, count#155L, sum#156, count#157L])\n      +- Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n         +- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n            :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n            :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n            :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n            :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n            :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n            :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n            :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n            :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n            :              +- Project [product_id#75L, price#77, category#78]\n            :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n            :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n            +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n               +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n                  +- Project [customer_id#91L, city#93]\n                     +- Filter isnotnull(customer_id#91L)\n                        +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["category#78", "city#93", "total_revenue#135", "num_sales#137L", "avg_price#139"], "type": "aggregate", "key_info": {"functions": ["sum", "count", "avg"], "group_by": ["category", "city"]}, "children": [{"name": "Exchange", "description": "Exchange hashpartitioning(category#78, city#93, 200), ENSURE_REQUIREMENTS, [plan_id=80]\n+- HashAggregate(keys=[category#78, city#93], functions=[partial_sum((cast(quantity#85L as double) * price#77)), partial_count(sale_id#83L), partial_avg(price#77)], output=[category#78, city#93, sum#154, count#155L, sum#156, count#157L])\n   +- Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n      +- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n         :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n         :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n         :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n         :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n         :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n         :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n         :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n         :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n         :              +- Project [product_id#75L, price#77, category#78]\n         :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n         :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n         +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n            +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n               +- Project [customer_id#91L, city#93]\n                  +- Filter isnotnull(customer_id#91L)\n                     +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["category#78", "city#93", "sum#154", "count#155L", "sum#156", "count#157L"], "type": "shuffle", "key_info": {"shuffle_type": "Hash", "is_shuffle": true}, "children": [{"name": "HashAggregate", "description": "HashAggregate(keys=[category#78, city#93], functions=[partial_sum((cast(quantity#85L as double) * price#77)), partial_count(sale_id#83L), partial_avg(price#77)], output=[category#78, city#93, sum#154, count#155L, sum#156, count#157L])\n+- Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n   +- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n      :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n      :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n      :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n      :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n      :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n      :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n      :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n      :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n      :              +- Project [product_id#75L, price#77, category#78]\n      :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n      :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n      +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n         +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n            +- Project [customer_id#91L, city#93]\n               +- Filter isnotnull(customer_id#91L)\n                  +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["category#78", "city#93", "sum#154", "count#155L", "sum#156", "count#157L"], "type": "aggregate", "key_info": {"group_by": ["category", "city"]}, "children": [{"name": "Project", "description": "Project [sale_id#83L, quantity#85L, price#77, category#78, city#93]\n+- SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n   :- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n   :  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n   :     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n   :        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n   :           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n   :           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n   :           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n   :           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n   :              +- Project [product_id#75L, price#77, category#78]\n   :                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n   :                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n   +- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n      +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n         +- Project [customer_id#91L, city#93]\n            +- Filter isnotnull(customer_id#91L)\n               +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["sale_id#83L", "quantity#85L", "price#77", "category#78", "city#93"], "type": "project", "key_info": {"columns": ["sale_id", "quantity", "price", "category", "city"]}, "children": [{"name": "SortMergeJoin", "description": "SortMergeJoin [(sale_id#83L % 500)], [customer_id#91L], LeftOuter\n:- Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n:  +- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n:     +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n:        +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n:           :- Project [sale_id#83L, product_id#84L, quantity#85L]\n:           :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n:           :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n:           +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n:              +- Project [product_id#75L, price#77, category#78]\n:                 +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n:                    +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n+- Sort [customer_id#91L ASC NULLS FIRST], false, 0\n   +- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n      +- Project [customer_id#91L, city#93]\n         +- Filter isnotnull(customer_id#91L)\n            +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["sale_id#83L", "quantity#85L", "price#77", "category#78", "customer_id#91L", "city#93"], "type": "join", "key_info": {"is_broadcast": true}, "children": [{"name": "Sort", "description": "Sort [(sale_id#83L % 500) ASC NULLS FIRST], false, 0\n+- Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n   +- Project [sale_id#83L, quantity#85L, price#77, category#78]\n      +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n         :- Project [sale_id#83L, product_id#84L, quantity#85L]\n         :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n         :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n         +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n            +- Project [product_id#75L, price#77, category#78]\n               +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n                  +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["sale_id#83L", "quantity#85L", "price#77", "category#78"], "type": "sort", "key_info": {"order": "(sale_id % 500) ASC"}, "children": [{"name": "Exchange", "description": "Exchange hashpartitioning((sale_id#83L % 500), 200), ENSURE_REQUIREMENTS, [plan_id=72]\n+- Project [sale_id#83L, quantity#85L, price#77, category#78]\n   +- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n      :- Project [sale_id#83L, product_id#84L, quantity#85L]\n      :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n      :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n      +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n         +- Project [product_id#75L, price#77, category#78]\n            +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n               +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["sale_id#83L", "quantity#85L", "price#77", "category#78"], "type": "shuffle", "key_info": {"shuffle_type": "Hash", "is_shuffle": true}, "children": [{"name": "Project", "description": "Project [sale_id#83L, quantity#85L, price#77, category#78]\n+- BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n   :- Project [sale_id#83L, product_id#84L, quantity#85L]\n   :  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n   :     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n   +- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n      +- Project [product_id#75L, price#77, category#78]\n         +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n            +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["sale_id#83L", "quantity#85L", "price#77", "category#78"], "type": "project", "key_info": {"columns": ["sale_id", "quantity", "price", "category"]}, "children": [{"name": "BroadcastHashJoin", "description": "BroadcastHashJoin [product_id#84L], [product_id#75L], Inner, BuildRight, false\n:- Project [sale_id#83L, product_id#84L, quantity#85L]\n:  +- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n:     +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n+- BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n   +- Project [product_id#75L, price#77, category#78]\n      +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n         +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["sale_id#83L", "product_id#84L", "quantity#85L", "product_id#75L", "price#77", "category#78"], "type": "join", "key_info": {"is_broadcast": true}, "children": [{"name": "Project", "description": "Project [sale_id#83L, product_id#84L, quantity#85L]\n+- Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n   +- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n", "output": ["sale_id#83L", "product_id#84L", "quantity#85L"], "type": "project", "key_info": {"columns": ["sale_id", "product_id", "quantity"]}, "children": [{"name": "Filter", "description": "Filter ((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))\n+- Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n", "output": ["sale_id#83L", "product_id#84L", "quantity#85L", "sale_date#86"], "type": "filter", "key_info": {"condition": "((isnotnull(quantity#85L) AND (quantity#85L > 1)) AND isnotnull(product_id#84L))"}, "children": [{"name": "Scan ExistingRDD", "description": "Scan ExistingRDD[sale_id#83L,product_id#84L,quantity#85L,sale_date#86]\n", "output": ["sale_id#83L", "product_id#84L", "quantity#85L", "sale_date#86"], "type": "scan", "key_info": {}, "children": [], "metrics": {"numOutputRows": 0}}], "metrics": {"numOutputRows": 0}}], "metrics": {}}, {"name": "BroadcastExchange", "description": "BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, true]),false), [plan_id=67]\n+- Project [product_id#75L, price#77, category#78]\n   +- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n      +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["product_id#75L", "price#77", "category#78"], "type": "shuffle", "key_info": {"is_shuffle": true}, "children": [{"name": "Project", "description": "Project [product_id#75L, price#77, category#78]\n+- Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n   +- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["product_id#75L", "price#77", "category#78"], "type": "project", "key_info": {"columns": ["product_id", "price", "category"]}, "children": [{"name": "Filter", "description": "Filter ((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))\n+- Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["product_id#75L", "product_name#76", "price#77", "category#78"], "type": "filter", "key_info": {"condition": "((isnotnull(price#77) AND ((price#77 > 50.0) AND category#78 IN (Category_1,Category_2,Category_3))) AND isnotnull(product_id#75L))"}, "children": [{"name": "Scan ExistingRDD", "description": "Scan ExistingRDD[product_id#75L,product_name#76,price#77,category#78]\n", "output": ["product_id#75L", "product_name#76", "price#77", "category#78"], "type": "scan", "key_info": {}, "children": [], "metrics": {"numOutputRows": 0}}], "metrics": {"numOutputRows": 0}}], "metrics": {}}], "metrics": {"broadcastTime": 0, "buildTime": 0, "collectTime": 0, "numOutputRows": 0, "dataSize": 0}}], "metrics": {"numOutputRows": 0}}], "metrics": {}}], "metrics": {"shuffleRecordsWritten": 0, "remoteMergedReqsDuration": 0, "remoteMergedBlocksFetched": 0, "recordsRead": 0, "localBytesRead": 0, "mergedFetchFallbackCount": 0, "localBlocksFetched": 0, "remoteMergedChunksFetched": 0, "remoteBlocksFetched": 0, "dataSize": 0, "localMergedBytesRead": 0, "localMergedChunksFetched": 0, "shuffleWriteTime": 0, "remoteMergedBytesRead": 0, "localMergedBlocksFetched": 0, "corruptMergedBlockChunks": 0, "fetchWaitTime": 0, "remoteBytesRead": 0, "numPartitions": 0, "remoteReqsDuration": 0, "remoteBytesReadToDisk": 0, "shuffleBytesWritten": 0}}], "metrics": {"sortTime": 0, "peakMemory": 0, "spillSize": 0}}, {"name": "Sort", "description": "Sort [customer_id#91L ASC NULLS FIRST], false, 0\n+- Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n   +- Project [customer_id#91L, city#93]\n      +- Filter isnotnull(customer_id#91L)\n         +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["customer_id#91L", "city#93"], "type": "sort", "key_info": {"order": "customer_id ASC"}, "children": [{"name": "Exchange", "description": "Exchange hashpartitioning(customer_id#91L, 200), ENSURE_REQUIREMENTS, [plan_id=73]\n+- Project [customer_id#91L, city#93]\n   +- Filter isnotnull(customer_id#91L)\n      +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["customer_id#91L", "city#93"], "type": "shuffle", "key_info": {"shuffle_type": "Hash", "is_shuffle": true}, "children": [{"name": "Project", "description": "Project [customer_id#91L, city#93]\n+- Filter isnotnull(customer_id#91L)\n   +- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["customer_id#91L", "city#93"], "type": "project", "key_info": {"columns": ["customer_id", "city"]}, "children": [{"name": "Filter", "description": "Filter isnotnull(customer_id#91L)\n+- Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["customer_id#91L", "customer_name#92", "city#93"], "type": "filter", "key_info": {"condition": "isnotnull(customer_id#91L)"}, "children": [{"name": "Scan ExistingRDD", "description": "Scan ExistingRDD[customer_id#91L,customer_name#92,city#93]\n", "output": ["customer_id#91L", "customer_name#92", "city#93"], "type": "scan", "key_info": {}, "children": [], "metrics": {"numOutputRows": 0}}], "metrics": {"numOutputRows": 0}}], "metrics": {}}], "metrics": {"shuffleRecordsWritten": 0, "remoteMergedReqsDuration": 0, "remoteMergedBlocksFetched": 0, "recordsRead": 0, "localBytesRead": 0, "mergedFetchFallbackCount": 0, "localBlocksFetched": 0, "remoteMergedChunksFetched": 0, "remoteBlocksFetched": 0, "dataSize": 0, "localMergedBytesRead": 0, "localMergedChunksFetched": 0, "shuffleWriteTime": 0, "remoteMergedBytesRead": 0, "localMergedBlocksFetched": 0, "corruptMergedBlockChunks": 0, "fetchWaitTime": 0, "remoteBytesRead": 0, "numPartitions": 0, "remoteReqsDuration": 0, "remoteBytesReadToDisk": 0, "shuffleBytesWritten": 0}}], "metrics": {"sortTime": 0, "peakMemory": 0, "spillSize": 0}}], "metrics": {"numOutputRows": 0, "spillSize": 0}}], "metrics": {}}], "metrics": {"spillSize": 0, "aggTime": 0, "peakMemory": 0, "numOutputRows": 0, "numTasksFallBacked": 0, "avgHashProbe": 0}}], "metrics": {"shuffleRecordsWritten": 0, "remoteMergedReqsDuration": 0, "remoteMergedBlocksFetched": 0, "recordsRead": 0, "localBytesRead": 0, "mergedFetchFallbackCount": 0, "localBlocksFetched": 0, "remoteMergedChunksFetched": 0, "remoteBlocksFetched": 0, "dataSize": 0, "localMergedBytesRead": 0, "localMergedChunksFetched": 0, "shuffleWriteTime": 0, "remoteMergedBytesRead": 0, "localMergedBlocksFetched": 0, "corruptMergedBlockChunks": 0, "fetchWaitTime": 0, "remoteBytesRead": 0, "numPartitions": 0, "remoteReqsDuration": 0, "remoteBytesReadToDisk": 0, "shuffleBytesWritten": 0}}], "metrics": {"spillSize": 0, "aggTime": 0, "peakMemory": 0, "numOutputRows": 0, "numTasksFallBacked": 0, "avgHashProbe": 0}}], "metrics": {"numOutputRows": 0}}], "metrics": {"shuffleRecordsWritten": 0, "remoteMergedReqsDuration": 0, "remoteMergedBlocksFetched": 0, "recordsRead": 0, "localBytesRead": 0, "mergedFetchFallbackCount": 0, "localBlocksFetched": 0, "remoteMergedChunksFetched": 0, "remoteBlocksFetched": 0, "dataSize": 0, "localMergedBytesRead": 0, "localMergedChunksFetched": 0, "shuffleWriteTime": 0, "remoteMergedBytesRead": 0, "localMergedBlocksFetched": 0, "corruptMergedBlockChunks": 0, "fetchWaitTime": 0, "remoteBytesRead": 0, "numPartitions": 0, "remoteReqsDuration": 0, "remoteBytesReadToDisk": 0, "shuffleBytesWritten": 0}}], "metrics": {"sortTime": 0, "peakMemory": 0, "spillSize": 0}}], "metrics": {}};
+
+        // Set dimensions
+        const container = document.getElementById('tree-container');
+        let width = container.clientWidth;
+        let height = container.clientHeight;
+
+        // Vertical Layout: Swap x and y concepts in d3
+        // We want the tree to grow Downwards.
+        // X axis = width (siblings)
+        // Y axis = height (depth)
+
+        const svg = d3.select("#tree-container").append("svg")
+            .attr("width", "100%")
+            .attr("height", "100%")
+            .call(d3.zoom().on("zoom", function (event) {
+                g.attr("transform", event.transform);
+            }))
+            .append("g");
+
+        const g = svg.append("g")
+            .attr("transform", "translate(" + width / 2 + "," + 50 + ")");
+
+        // Define arrowhead marker
+        svg.append("defs").append("marker")
+            .attr("id", "arrowhead")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 8)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#999")
+            .attr("opacity", 0.6);
+
+        let i = 0, duration = 500, root;
+
+        // Node Size: [Width, Height] spacing
+        const treemap = d3.tree().nodeSize([180, 150]);
+
+        // Assigns parent, children, height, depth
+        root = d3.hierarchy(treeData, function (d) { return d.children; });
+        root.x0 = 0;
+        root.y0 = 0; // Top center
+
+        update(root);
+
+        function update(source) {
+            const treeData = treemap(root);
+            const nodes = treeData.descendants();
+            const links = treeData.links();
+
+            // INVERT THE TREE: Calculate max depth and invert y positions
+            // This makes leaves (scans) appear at top and root (result) at bottom
+            const maxDepth = Math.max(...nodes.map(d => d.depth));
+            nodes.forEach(d => {
+                d.y = (maxDepth - d.depth) * 120;  // Invert depth calculation
+            });
+
+            // ****************** Nodes section ***************************
+            const node = g.selectAll('g.node')
+                .data(nodes, d => d.id || (d.id = ++i));
+
+            const nodeEnter = node.enter().append('g')
+                .attr('class', function (d) {
+                    return "node " + (d.data.type || "other");
+                })
+                .attr("transform", d => "translate(" + source.x0 + "," + source.y0 + ")")
+                .on('click', click);
+
+            // Calculate dynamic node dimensions based on content
+            function getNodeDimensions(d) {
+                const baseWidth = 140;
+                const baseHeight = 50;
+                let extraHeight = 0;
+
+                // Add height for key info lines
+                if (d.data.key_info) {
+                    const keyCount = Object.keys(d.data.key_info).length;
+                    extraHeight = keyCount * 15;
+                }
+
+                return { width: baseWidth, height: baseHeight + extraHeight };
+            }
+
+            nodeEnter.append('rect')
+                .attr('class', 'node')
+                .attr('width', 1e-6)
+                .attr('height', 1e-6)
+                .attr('x', 0)
+                .attr('y', 0);
+
+            // Add node title (operation name)
+            nodeEnter.append('text')
+                .attr('class', 'node-title')
+                .attr("dy", "0em")
+                .attr("y", 0)
+                .attr("x", 0)
+                .attr("text-anchor", "middle")
+                .text(function (d) {
+                    return d.data.name.length > 25 ? d.data.name.substring(0, 23) + "..." : d.data.name;
+                });
+
+            // Add key info details
+            nodeEnter.each(function (d) {
+                const node = d3.select(this);
+                let yOffset = 15;
+
+                if (d.data.key_info) {
+                    // For joins, show join type
+                    if (d.data.key_info.join_type) {
+                        let joinText = `Type: ${d.data.key_info.join_type}`;
+                        if (d.data.key_info.is_broadcast) {
+                            joinText = '📡 Broadcast ' + joinText;
+                        }
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .text(joinText);
+                        yOffset += 15;
+                    }
+
+                    // For filters, show condition (truncated)
+                    if (d.data.key_info.condition) {
+                        let cond = d.data.key_info.condition;
+                        if (cond.length > 30) {
+                            cond = cond.substring(0, 28) + '...';
+                        }
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .text(cond);
+                        yOffset += 15;
+                    }
+
+                    // For scans, show table name
+                    if (d.data.key_info.table) {
+                        let tableText = `Table: ${d.data.key_info.table}`;
+                        if (d.data.key_info.format) {
+                            tableText += ` (${d.data.key_info.format})`;
+                        }
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .text(tableText);
+                        yOffset += 15;
+                    }
+
+                    // Show pushed filters (performance optimization)
+                    if (d.data.key_info.pushed_filters && d.data.key_info.pushed_filters.length > 0) {
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .style('fill', '#27ae60')
+                            .text('✓ Filters pushed');
+                        yOffset += 15;
+                    }
+
+                    // For shuffles, show shuffle type and partitions
+                    if (d.data.key_info.is_shuffle) {
+                        let shuffleInfo = '⚠️ SHUFFLE';
+                        if (d.data.key_info.shuffle_type) {
+                            shuffleInfo += ` (${d.data.key_info.shuffle_type})`;
+                        }
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .style('fill', '#e74c3c')
+                            .style('font-weight', 'bold')
+                            .text(shuffleInfo);
+                        yOffset += 15;
+
+                        if (d.data.key_info.partitions) {
+                            node.append('text')
+                                .attr('class', 'node-detail')
+                                .attr('x', 0)
+                                .attr('y', yOffset)
+                                .attr('text-anchor', 'middle')
+                                .text(`Partitions: ${d.data.key_info.partitions}`);
+                            yOffset += 15;
+                        }
+                    }
+
+                    // For projects, show columns (first few)
+                    if (d.data.key_info.columns) {
+                        const cols = d.data.key_info.columns.slice(0, 3).join(', ');
+                        const displayCols = cols.length > 30 ? cols.substring(0, 28) + '...' : cols;
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .text(displayCols);
+                        yOffset += 15;
+                    }
+
+                    // For aggregates, show functions
+                    if (d.data.key_info.functions) {
+                        const funcs = d.data.key_info.functions.slice(0, 2).join(', ');
+                        const displayFuncs = funcs.length > 30 ? funcs.substring(0, 28) + '...' : funcs;
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .text(displayFuncs);
+                        yOffset += 15;
+                    }
+
+                    // Show grouping keys
+                    if (d.data.key_info.group_by) {
+                        const keys = d.data.key_info.group_by.join(', ');
+                        const displayKeys = keys.length > 30 ? keys.substring(0, 28) + '...' : keys;
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .text(`By: ${displayKeys}`);
+                        yOffset += 15;
+                    }
+
+                    // For sort operations, show order
+                    if (d.data.key_info.order) {
+                        node.append('text')
+                            .attr('class', 'node-detail')
+                            .attr('x', 0)
+                            .attr('y', yOffset)
+                            .attr('text-anchor', 'middle')
+                            .text(d.data.key_info.order);
+                        yOffset += 15;
+                    }
+                }
+            });
+
+            const nodeUpdate = node.merge(nodeEnter).transition().duration(duration)
+                .attr("transform", d => "translate(" + d.x + "," + d.y + ")");
+
+            nodeUpdate.select('rect.node')
+                .attr('width', d => getNodeDimensions(d).width)
+                .attr('height', d => getNodeDimensions(d).height)
+                .attr('x', d => -getNodeDimensions(d).width / 2)
+                .attr('y', d => -getNodeDimensions(d).height / 2);
+
+            nodeUpdate.selectAll('text').style('fill-opacity', 1);
+
+            const nodeExit = node.exit().transition().duration(duration)
+                .attr("transform", d => "translate(" + source.x + "," + source.y + ")")
+                .remove();
+
+            nodeExit.select('rect').attr('width', 1e-6).attr('height', 1e-6);
+            nodeExit.selectAll('text').style('fill-opacity', 1e-6);
+
+            // ****************** Links section ***************************
+            const link = g.selectAll('path.link')
+                .data(links, d => d.target.id);
+
+            const linkEnter = link.enter().insert('path', "g")
+                .attr("class", "link")
+                .attr('d', function (d) {
+                    const o = { x: source.x0, y: source.y0 };
+                    return diagonal(o, o);
+                });
+
+            const linkUpdate = link.merge(linkEnter).transition().duration(duration)
+                .attr('d', d => diagonal(d.source, d.target));
+
+            const linkExit = link.exit().transition().duration(duration)
+                .attr('d', function (d) {
+                    const o = { x: source.x, y: source.y };
+                    return diagonal(o, o);
+                })
+                .remove();
+
+            nodes.forEach(d => {
+                d.x0 = d.x;
+                d.y0 = d.y;
+            });
+
+            function diagonal(s, d) {
+                // Vertical Bezier - with inverted tree, parent is visually below child
+                // So we draw from d (child/source at top) to s (parent/result at bottom)
+                return `M ${d.x} ${d.y}
+                    C ${d.x} ${(s.y + d.y) / 2},
+                      ${s.x} ${(s.y + d.y) / 2},
+                      ${s.x} ${s.y}`;
+            }
+        }
+
+        // Interaction Logic
+        let selectedNodeId = null;
+
+        function click(event, d) {
+            // Toggle Panel
+            const panel = document.getElementById('details-panel');
+
+            // Highlight logic
+            d3.selectAll('.node').classed('selected', false);
+
+            if (selectedNodeId === d.id) {
+                // Deselect if clicking same node
+                closePanel();
+                selectedNodeId = null;
+            } else {
+                // Select new node
+                d3.select(this).classed('selected', true);
+                selectedNodeId = d.id;
+                showDetails(d);
+            }
+        }
+
+        function showDetails(d) {
+            const panel = document.getElementById('details-panel');
+            const title = document.getElementById('panel-title');
+            const content = document.getElementById('panel-content');
+
+            panel.classList.add('visible');
+            title.innerText = d.data.name;
+
+            let desc = d.data.description || "";
+
+            let html = "";
+
+            // Show key information at the top
+            if (d.data.key_info && Object.keys(d.data.key_info).length > 0) {
+                html += "<div class='details-section'>";
+                html += "<div class='details-label'>Key Information</div>";
+                html += "<div class='details-content'>";
+
+                // Highlight shuffle operations
+                if (d.data.key_info.is_shuffle) {
+                    html += "<strong style='color: #e74c3c;'>⚠️ SHUFFLE OPERATION</strong>\n";
+                    html += "<em>Shuffle operations can be performance bottlenecks as they require data movement across executors.</em>\n\n";
+
+                    if (d.data.key_info.shuffle_type) {
+                        html += "<strong>Shuffle Type:</strong> " + d.data.key_info.shuffle_type + "\n";
+                    }
+                    if (d.data.key_info.partitions) {
+                        html += "<strong>Partitions:</strong> " + d.data.key_info.partitions + "\n";
+                    }
+                }
+
+                if (d.data.key_info.join_type) {
+                    html += "<strong>Join Type:</strong> " + d.data.key_info.join_type;
+                    if (d.data.key_info.is_broadcast) {
+                        html += " <span style='color: #27ae60;'>📡 BROADCAST (optimized)</span>";
+                        if (d.data.key_info.build_side) {
+                            html += "\n<strong>Build Side:</strong> " + d.data.key_info.build_side;
+                        }
+                    }
+                    html += "\n";
+                }
+                if (d.data.key_info.condition) {
+                    html += "<strong>Condition:</strong> " + d.data.key_info.condition + "\n";
+                }
+                if (d.data.key_info.table) {
+                    html += "<strong>Table:</strong> " + d.data.key_info.table + "\n";
+                }
+                if (d.data.key_info.format) {
+                    html += "<strong>Format:</strong> " + d.data.key_info.format + "\n";
+                }
+                if (d.data.key_info.pushed_filters && d.data.key_info.pushed_filters.length > 0) {
+                    html += "<strong style='color: #27ae60;'>✓ Pushed Filters:</strong>\n";
+                    d.data.key_info.pushed_filters.forEach(f => {
+                        html += "  • " + f + "\n";
+                    });
+                }
+                if (d.data.key_info.columns) {
+                    html += "<strong>Columns:</strong> " + d.data.key_info.columns.join(', ') + "\n";
+                }
+                if (d.data.key_info.functions) {
+                    html += "<strong>Functions:</strong> " + d.data.key_info.functions.join(', ') + "\n";
+                }
+                if (d.data.key_info.group_by) {
+                    html += "<strong>Group By:</strong> " + d.data.key_info.group_by.join(', ') + "\n";
+                }
+                if (d.data.key_info.order) {
+                    html += "<strong>Sort Order:</strong> " + d.data.key_info.order + "\n";
+                } html += "</div>";
+                html += "</div>";
+            }
+
+            if (desc) {
+                html += "<div class='details-section'>";
+                html += "<div class='details-label'>Full Description</div>";
+                html += "<div class='details-content'>" + desc + "</div>";
+                html += "</div>";
+            }
+
+            if (d.data.output && d.data.output.length > 0) {
+                html += "<div class='details-section'>";
+                html += "<div class='details-label'>Output Columns</div>";
+                html += "<div class='details-content'>" + d.data.output.join("\n") + "</div>";
+                html += "</div>";
+            }
+
+            content.innerHTML = html;
+        }
+
+        window.closePanel = function () {
+            document.getElementById('details-panel').classList.remove('visible');
+            d3.selectAll('.node').classed('selected', false);
+            selectedNodeId = null;
+        }
+
+        // Zoom Controls
+        const zoomBehavior = d3.zoom().on("zoom", (e) => g.attr("transform", e.transform));
+        const svgSelect = d3.select("svg");
+
+        function zoomIn() { svgSelect.transition().call(zoomBehavior.scaleBy, 1.2); }
+        function zoomOut() { svgSelect.transition().call(zoomBehavior.scaleBy, 0.8); }
+        function resetZoom() {
+            const currentWidth = container.clientWidth;
+            svgSelect.transition().call(zoomBehavior.transform, d3.zoomIdentity.translate(currentWidth / 2, 50));
+        }
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            width = container.clientWidth;
+            height = container.clientHeight;
+            svgSelect.attr("width", width).attr("height", height);
+        });
+
+    </script>
+</body>
+
+</html>
