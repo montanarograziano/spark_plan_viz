@@ -16,8 +16,9 @@ A lightweight, interactive tool to visualize PySpark execution plans using D3.js
 
 ## 🚀 Installation
 
+Using uv (install [here](https://docs.astral.sh/uv/getting-started/installation/)):
 ```sh
-pip install spark-plan-viz
+uv add spark-plan-viz
 ```
 
 ## 📖 Usage
