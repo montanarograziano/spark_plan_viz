@@ -91,3 +91,4 @@ spark-warehouse/
 # Temporary files
 *.tmp
 *.bak
+site/
