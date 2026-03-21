@@ -27,11 +27,34 @@
             z-index: 10;
         }
 
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
         h2 {
             margin: 0;
             color: #333;
             font-size: 18px;
         }
+
+        .suggestions-summary {
+            font-size: 12px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .summary-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        .summary-badge.error { background: #fadbd8; color: #c0392b; }
+        .summary-badge.warning { background: #fdebd0; color: #e67e22; }
+        .summary-badge.info { background: #d6eaf8; color: #2980b9; }
 
         .legend {
             font-size: 12px;
@@ -71,7 +94,7 @@
             cursor: grabbing;
         }
 
-        /* Details Panel (replaces Tooltip) */
+        /* Details Panel */
         #details-panel {
             width: 400px;
             background: #fff;
@@ -79,7 +102,6 @@
             padding: 20px;
             overflow-y: auto;
             display: none;
-            /* Hidden by default */
             flex-shrink: 0;
             box-shadow: -2px 0 5px rgba(0, 0, 0, 0.05);
             position: relative;
@@ -142,6 +164,116 @@
             border: 1px solid #eee;
         }
 
+        /* Suggestions Panel */
+        #suggestions-panel {
+            width: 350px;
+            background: #fff;
+            border-right: 1px solid #ddd;
+            overflow-y: auto;
+            display: none;
+            flex-shrink: 0;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+            z-index: 20;
+        }
+
+        #suggestions-panel.visible {
+            display: block;
+        }
+
+        .suggestions-header {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: #fff;
+            z-index: 1;
+        }
+
+        .suggestions-header h3 {
+            margin: 0;
+            font-size: 15px;
+            color: #2c3e50;
+        }
+
+        .suggestion-group {
+            padding: 10px 15px;
+        }
+
+        .suggestion-group-title {
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #7f8c8d;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .suggestion-card {
+            background: #f8f9fa;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .suggestion-card:hover {
+            border-color: #bbb;
+        }
+
+        .suggestion-card.error { border-left: 3px solid #e74c3c; }
+        .suggestion-card.warning { border-left: 3px solid #f39c12; }
+        .suggestion-card.info { border-left: 3px solid #3498db; }
+
+        .suggestion-title {
+            font-weight: bold;
+            font-size: 12px;
+            color: #2c3e50;
+            margin-bottom: 4px;
+        }
+
+        .suggestion-message {
+            font-size: 11px;
+            color: #555;
+            line-height: 1.4;
+        }
+
+        .suggestion-node {
+            font-size: 10px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        /* Severity icons */
+        .severity-icon {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 14px;
+            font-size: 9px;
+            font-weight: bold;
+            color: #fff;
+            flex-shrink: 0;
+        }
+
+        .severity-icon.error { background: #e74c3c; }
+        .severity-icon.warning { background: #f39c12; }
+        .severity-icon.info { background: #3498db; }
+
+        /* Node badge dots for suggestions */
+        .suggestion-badge {
+            pointer-events: none;
+        }
+
         /* Node Styling */
         .node rect {
             fill: #fff;
@@ -188,50 +320,15 @@
         }
 
         /* Node Type Colors */
-        .node.shuffle rect {
-            stroke: #e74c3c;
-            fill: #fadbd8;
-        }
-
-        .node.scan rect {
-            stroke: #27ae60;
-            fill: #d5f5e3;
-        }
-
-        .node.join rect {
-            stroke: #8e44ad;
-            fill: #ebdef0;
-        }
-
-        .node.filter rect {
-            stroke: #f39c12;
-            fill: #fdebd0;
-        }
-
-        .node.aggregate rect {
-            stroke: #2980b9;
-            fill: #d6eaf8;
-        }
-
-        .node.sort rect {
-            stroke: #d35400;
-            fill: #edbb99;
-        }
-
-        .node.project rect {
-            stroke: #7f8c8d;
-            fill: #eaeded;
-        }
-
-        .node.window rect {
-            stroke: #16a085;
-            fill: #a2d9ce;
-        }
-
-        .node.union rect {
-            stroke: #2c3e50;
-            fill: #abb2b9;
-        }
+        .node.shuffle rect { stroke: #e74c3c; fill: #fadbd8; }
+        .node.scan rect { stroke: #27ae60; fill: #d5f5e3; }
+        .node.join rect { stroke: #8e44ad; fill: #ebdef0; }
+        .node.filter rect { stroke: #f39c12; fill: #fdebd0; }
+        .node.aggregate rect { stroke: #2980b9; fill: #d6eaf8; }
+        .node.sort rect { stroke: #d35400; fill: #edbb99; }
+        .node.project rect { stroke: #7f8c8d; fill: #eaeded; }
+        .node.window rect { stroke: #16a085; fill: #a2d9ce; }
+        .node.union rect { stroke: #2c3e50; fill: #abb2b9; }
 
         /* Controls */
         .controls {
@@ -257,43 +354,49 @@
         .btn:hover {
             background: #f0f0f0;
         }
+
+        .toggle-suggestions-btn {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 5;
+            font-size: 13px;
+            padding: 6px 12px;
+        }
     </style>
 </head>
 
 <body>
 
     <div id="header">
-        <h2>Spark Physical Plan</h2>
+        <div class="header-left">
+            <h2>Spark Physical Plan</h2>
+            <div class="suggestions-summary" id="suggestions-summary"></div>
+        </div>
         <div class="legend">
-            <div class="legend-item">
-                <div class="dot" style="background: #e74c3c"></div> Exchange
-            </div>
-            <div class="legend-item">
-                <div class="dot" style="background: #8e44ad"></div> Join
-            </div>
-            <div class="legend-item">
-                <div class="dot" style="background: #27ae60"></div> Scan
-            </div>
-            <div class="legend-item">
-                <div class="dot" style="background: #f39c12"></div> Filter
-            </div>
-            <div class="legend-item">
-                <div class="dot" style="background: #2980b9"></div> Agg
-            </div>
-            <div class="legend-item">
-                <div class="dot" style="background: #d35400"></div> Sort
-            </div>
-            <div class="legend-item">
-                <div class="dot" style="background: #16a085"></div> Window
-            </div>
-            <div class="legend-item">
-                <div class="dot" style="background: #7f8c8d"></div> Project
-            </div>
+            <div class="legend-item"><div class="dot" style="background: #e74c3c"></div> Exchange</div>
+            <div class="legend-item"><div class="dot" style="background: #8e44ad"></div> Join</div>
+            <div class="legend-item"><div class="dot" style="background: #27ae60"></div> Scan</div>
+            <div class="legend-item"><div class="dot" style="background: #f39c12"></div> Filter</div>
+            <div class="legend-item"><div class="dot" style="background: #2980b9"></div> Agg</div>
+            <div class="legend-item"><div class="dot" style="background: #d35400"></div> Sort</div>
+            <div class="legend-item"><div class="dot" style="background: #16a085"></div> Window</div>
+            <div class="legend-item"><div class="dot" style="background: #7f8c8d"></div> Project</div>
         </div>
     </div>
 
     <div id="main-container">
-        <div id="tree-container"></div>
+        <div id="suggestions-panel">
+            <div class="suggestions-header">
+                <h3>Optimization Suggestions</h3>
+                <button class="close-btn" onclick="toggleSuggestions()">×</button>
+            </div>
+            <div id="suggestions-content"></div>
+        </div>
+
+        <div id="tree-container">
+            <button class="btn toggle-suggestions-btn" id="toggle-suggestions-btn" onclick="toggleSuggestions()" style="display:none">Suggestions</button>
+        </div>
         <div id="details-panel">
             <div class="panel-header">
                 <h3 id="panel-title">Node Details</h3>
@@ -305,31 +408,125 @@
         <div class="controls">
             <button class="btn" onclick="zoomIn()" title="Zoom In">+</button>
             <button class="btn" onclick="zoomOut()" title="Zoom Out">-</button>
-            <button class="btn" onclick="resetZoom()" title="Reset View">⟲</button>
+            <button class="btn" onclick="resetZoom()" title="Reset View">&#x27F2;</button>
         </div>
     </div>
 
     <!-- Load D3.js from CDN -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script>
+        // XSS utility: escape HTML entities
+        function escapeHtml(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         const treeData = {{ TREE_DATA }};
 
-        // Set dimensions
+        // --- Suggestions panel logic ---
+        function collectSuggestions(node, list) {
+            if (node.suggestions && node.suggestions.length > 0) {
+                node.suggestions.forEach(function(s) {
+                    list.push(Object.assign({}, s, { _nodeName: node.name }));
+                });
+            }
+            if (node.children) {
+                node.children.forEach(function(c) { collectSuggestions(c, list); });
+            }
+        }
+
+        const allSuggestions = [];
+        collectSuggestions(treeData, allSuggestions);
+
+        function renderSuggestions() {
+            const content = document.getElementById('suggestions-content');
+            const summary = document.getElementById('suggestions-summary');
+            const toggleBtn = document.getElementById('toggle-suggestions-btn');
+
+            if (allSuggestions.length === 0) {
+                content.innerHTML = '<div style="padding:20px;color:#999;text-align:center">No optimization suggestions.</div>';
+                return;
+            }
+
+            toggleBtn.style.display = 'block';
+
+            // Count by severity
+            const counts = { error: 0, warning: 0, info: 0 };
+            allSuggestions.forEach(function(s) { counts[s.severity] = (counts[s.severity] || 0) + 1; });
+
+            let summaryHtml = '';
+            if (counts.error > 0) summaryHtml += '<span class="summary-badge error">' + counts.error + ' error' + (counts.error > 1 ? 's' : '') + '</span>';
+            if (counts.warning > 0) summaryHtml += '<span class="summary-badge warning">' + counts.warning + ' warning' + (counts.warning > 1 ? 's' : '') + '</span>';
+            if (counts.info > 0) summaryHtml += '<span class="summary-badge info">' + counts.info + ' info</span>';
+            summary.innerHTML = summaryHtml;
+
+            // Group by severity
+            const groups = { error: [], warning: [], info: [] };
+            allSuggestions.forEach(function(s) {
+                if (groups[s.severity]) groups[s.severity].push(s);
+            });
+
+            const severityLabels = {
+                error: { label: 'Errors', icon: '!' },
+                warning: { label: 'Warnings', icon: '!' },
+                info: { label: 'Info', icon: 'i' }
+            };
+
+            let html = '';
+            ['error', 'warning', 'info'].forEach(function(sev) {
+                if (groups[sev].length === 0) return;
+                html += '<div class="suggestion-group">';
+                html += '<div class="suggestion-group-title"><span class="severity-icon ' + sev + '">' + severityLabels[sev].icon + '</span> ' + severityLabels[sev].label + ' (' + groups[sev].length + ')</div>';
+                groups[sev].forEach(function(s) {
+                    html += '<div class="suggestion-card ' + sev + '" onclick="highlightNode(\'' + escapeHtml(s._nodeName) + '\')">';
+                    html += '<div class="suggestion-title">' + escapeHtml(s.title) + '</div>';
+                    html += '<div class="suggestion-message">' + escapeHtml(s.message) + '</div>';
+                    html += '<div class="suggestion-node">Node: ' + escapeHtml(s.node_name || s._nodeName) + '</div>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            });
+
+            content.innerHTML = html;
+        }
+
+        function toggleSuggestions() {
+            const panel = document.getElementById('suggestions-panel');
+            panel.classList.toggle('visible');
+        }
+
+        function highlightNode(nodeName) {
+            // Find and click the matching tree node
+            d3.selectAll('.node').each(function(d) {
+                if (d && d.data && d.data.name === nodeName) {
+                    d3.selectAll('.node').classed('selected', false);
+                    d3.select(this).classed('selected', true);
+                    selectedNodeId = d.id;
+                    showDetails(d);
+                }
+            });
+        }
+
+        renderSuggestions();
+
+        // --- Tree visualization ---
         const container = document.getElementById('tree-container');
         let width = container.clientWidth;
         let height = container.clientHeight;
 
-        // Vertical Layout: Swap x and y concepts in d3
-        // We want the tree to grow Downwards.
-        // X axis = width (siblings)
-        // Y axis = height (depth)
+        const zoomBehavior = d3.zoom().on("zoom", function (event) {
+            g.attr("transform", event.transform);
+        });
 
         const svg = d3.select("#tree-container").append("svg")
             .attr("width", "100%")
             .attr("height", "100%")
-            .call(d3.zoom().on("zoom", function (event) {
-                g.attr("transform", event.transform);
-            }))
+            .call(zoomBehavior)
             .append("g");
 
         const g = svg.append("g")
@@ -351,26 +548,22 @@
 
         let i = 0, duration = 500, root;
 
-        // Node Size: [Width, Height] spacing
         const treemap = d3.tree().nodeSize([180, 150]);
 
-        // Assigns parent, children, height, depth
         root = d3.hierarchy(treeData, function (d) { return d.children; });
         root.x0 = 0;
-        root.y0 = 0; // Top center
+        root.y0 = 0;
 
         update(root);
 
         function update(source) {
-            const treeData = treemap(root);
-            const nodes = treeData.descendants();
-            const links = treeData.links();
+            const treeLayout = treemap(root);
+            const nodes = treeLayout.descendants();
+            const links = treeLayout.links();
 
-            // INVERT THE TREE: Calculate max depth and invert y positions
-            // This makes leaves (scans) appear at top and root (result) at bottom
             const maxDepth = Math.max(...nodes.map(d => d.depth));
             nodes.forEach(d => {
-                d.y = (maxDepth - d.depth) * 120;  // Invert depth calculation
+                d.y = (maxDepth - d.depth) * 120;
             });
 
             // ****************** Nodes section ***************************
@@ -384,18 +577,14 @@
                 .attr("transform", d => "translate(" + source.x0 + "," + source.y0 + ")")
                 .on('click', click);
 
-            // Calculate dynamic node dimensions based on content
             function getNodeDimensions(d) {
                 const baseWidth = 140;
                 const baseHeight = 50;
                 let extraHeight = 0;
-
-                // Add height for key info lines
                 if (d.data.key_info) {
                     const keyCount = Object.keys(d.data.key_info).length;
                     extraHeight = keyCount * 15;
                 }
-
                 return { width: baseWidth, height: baseHeight + extraHeight };
             }
 
@@ -406,7 +595,6 @@
                 .attr('x', 0)
                 .attr('y', 0);
 
-            // Add node title (operation name)
             nodeEnter.append('text')
                 .attr('class', 'node-title')
                 .attr("dy", "0em")
@@ -419,142 +607,84 @@
 
             // Add key info details
             nodeEnter.each(function (d) {
-                const node = d3.select(this);
+                const nodeEl = d3.select(this);
                 let yOffset = 15;
 
                 if (d.data.key_info) {
-                    // For joins, show join type
                     if (d.data.key_info.join_type) {
-                        let joinText = `Type: ${d.data.key_info.join_type}`;
+                        let joinText = 'Type: ' + d.data.key_info.join_type;
                         if (d.data.key_info.is_broadcast) {
-                            joinText = '📡 Broadcast ' + joinText;
+                            joinText = '\uD83D\uDCE1 Broadcast ' + joinText;
                         }
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .text(joinText);
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text(joinText);
                         yOffset += 15;
                     }
-
-                    // For filters, show condition (truncated)
                     if (d.data.key_info.condition) {
                         let cond = d.data.key_info.condition;
-                        if (cond.length > 30) {
-                            cond = cond.substring(0, 28) + '...';
-                        }
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .text(cond);
+                        if (cond.length > 30) cond = cond.substring(0, 28) + '...';
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text(cond);
                         yOffset += 15;
                     }
-
-                    // For scans, show table name
                     if (d.data.key_info.table) {
-                        let tableText = `Table: ${d.data.key_info.table}`;
-                        if (d.data.key_info.format) {
-                            tableText += ` (${d.data.key_info.format})`;
-                        }
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .text(tableText);
+                        let tableText = 'Table: ' + d.data.key_info.table;
+                        if (d.data.key_info.format) tableText += ' (' + d.data.key_info.format + ')';
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text(tableText);
                         yOffset += 15;
                     }
-
-                    // Show pushed filters (performance optimization)
                     if (d.data.key_info.pushed_filters && d.data.key_info.pushed_filters.length > 0) {
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .style('fill', '#27ae60')
-                            .text('✓ Filters pushed');
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').style('fill', '#27ae60').text('\u2713 Filters pushed');
                         yOffset += 15;
                     }
-
-                    // For shuffles, show shuffle type and partitions
                     if (d.data.key_info.is_shuffle) {
-                        let shuffleInfo = '⚠️ SHUFFLE';
-                        if (d.data.key_info.shuffle_type) {
-                            shuffleInfo += ` (${d.data.key_info.shuffle_type})`;
-                        }
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .style('fill', '#e74c3c')
-                            .style('font-weight', 'bold')
-                            .text(shuffleInfo);
+                        let shuffleInfo = '\u26A0\uFE0F SHUFFLE';
+                        if (d.data.key_info.shuffle_type) shuffleInfo += ' (' + d.data.key_info.shuffle_type + ')';
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').style('fill', '#e74c3c').style('font-weight', 'bold').text(shuffleInfo);
                         yOffset += 15;
-
                         if (d.data.key_info.partitions) {
-                            node.append('text')
-                                .attr('class', 'node-detail')
-                                .attr('x', 0)
-                                .attr('y', yOffset)
-                                .attr('text-anchor', 'middle')
-                                .text(`Partitions: ${d.data.key_info.partitions}`);
+                            nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text('Partitions: ' + d.data.key_info.partitions);
                             yOffset += 15;
                         }
                     }
-
-                    // For projects, show columns (first few)
                     if (d.data.key_info.columns) {
                         const cols = d.data.key_info.columns.slice(0, 3).join(', ');
                         const displayCols = cols.length > 30 ? cols.substring(0, 28) + '...' : cols;
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .text(displayCols);
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text(displayCols);
                         yOffset += 15;
                     }
-
-                    // For aggregates, show functions
                     if (d.data.key_info.functions) {
                         const funcs = d.data.key_info.functions.slice(0, 2).join(', ');
                         const displayFuncs = funcs.length > 30 ? funcs.substring(0, 28) + '...' : funcs;
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .text(displayFuncs);
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text(displayFuncs);
                         yOffset += 15;
                     }
-
-                    // Show grouping keys
                     if (d.data.key_info.group_by) {
                         const keys = d.data.key_info.group_by.join(', ');
                         const displayKeys = keys.length > 30 ? keys.substring(0, 28) + '...' : keys;
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .text(`By: ${displayKeys}`);
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text('By: ' + displayKeys);
                         yOffset += 15;
                     }
-
-                    // For sort operations, show order
                     if (d.data.key_info.order) {
-                        node.append('text')
-                            .attr('class', 'node-detail')
-                            .attr('x', 0)
-                            .attr('y', yOffset)
-                            .attr('text-anchor', 'middle')
-                            .text(d.data.key_info.order);
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text(d.data.key_info.order);
                         yOffset += 15;
+                    }
+                }
+
+                // Add suggestion badge dots
+                if (d.data.suggestions && d.data.suggestions.length > 0) {
+                    const dims = getNodeDimensions(d);
+                    const hasSeverity = function(sev) { return d.data.suggestions.some(function(s) { return s.severity === sev; }); };
+                    let bx = dims.width / 2 - 8;
+                    const by = -dims.height / 2 - 5;
+                    if (hasSeverity('error')) {
+                        nodeEl.append('circle').attr('class', 'suggestion-badge').attr('cx', bx).attr('cy', by).attr('r', 5).attr('fill', '#e74c3c');
+                        bx -= 12;
+                    }
+                    if (hasSeverity('warning')) {
+                        nodeEl.append('circle').attr('class', 'suggestion-badge').attr('cx', bx).attr('cy', by).attr('r', 5).attr('fill', '#f39c12');
+                        bx -= 12;
+                    }
+                    if (hasSeverity('info')) {
+                        nodeEl.append('circle').attr('class', 'suggestion-badge').attr('cx', bx).attr('cy', by).attr('r', 5).attr('fill', '#3498db');
                     }
                 }
             });
@@ -588,10 +718,10 @@
                     return diagonal(o, o);
                 });
 
-            const linkUpdate = link.merge(linkEnter).transition().duration(duration)
+            link.merge(linkEnter).transition().duration(duration)
                 .attr('d', d => diagonal(d.source, d.target));
 
-            const linkExit = link.exit().transition().duration(duration)
+            link.exit().transition().duration(duration)
                 .attr('d', function (d) {
                     const o = { x: source.x, y: source.y };
                     return diagonal(o, o);
@@ -604,12 +734,10 @@
             });
 
             function diagonal(s, d) {
-                // Vertical Bezier - with inverted tree, parent is visually below child
-                // So we draw from d (child/source at top) to s (parent/result at bottom)
-                return `M ${d.x} ${d.y}
-                    C ${d.x} ${(s.y + d.y) / 2},
-                      ${s.x} ${(s.y + d.y) / 2},
-                      ${s.x} ${s.y}`;
+                return 'M ' + d.x + ' ' + d.y +
+                    ' C ' + d.x + ' ' + (s.y + d.y) / 2 +
+                    ', ' + s.x + ' ' + (s.y + d.y) / 2 +
+                    ', ' + s.x + ' ' + s.y;
             }
         }
 
@@ -617,18 +745,13 @@
         let selectedNodeId = null;
 
         function click(event, d) {
-            // Toggle Panel
             const panel = document.getElementById('details-panel');
-
-            // Highlight logic
             d3.selectAll('.node').classed('selected', false);
 
             if (selectedNodeId === d.id) {
-                // Deselect if clicking same node
                 closePanel();
                 selectedNodeId = null;
             } else {
-                // Select new node
                 d3.select(this).classed('selected', true);
                 selectedNodeId = d.id;
                 showDetails(d);
@@ -641,10 +764,9 @@
             const content = document.getElementById('panel-content');
 
             panel.classList.add('visible');
-            title.innerText = d.data.name;
+            title.textContent = d.data.name;
 
             let desc = d.data.description || "";
-
             let html = "";
 
             // Show key information at the top
@@ -653,70 +775,59 @@
                 html += "<div class='details-label'>Key Information</div>";
                 html += "<div class='details-content'>";
 
-                // Highlight shuffle operations
                 if (d.data.key_info.is_shuffle) {
-                    html += "<strong style='color: #e74c3c;'>⚠️ SHUFFLE OPERATION</strong>\n";
+                    html += "<strong style='color: #e74c3c;'>\u26A0\uFE0F SHUFFLE OPERATION</strong>\n";
                     html += "<em>Shuffle operations can be performance bottlenecks as they require data movement across executors.</em>\n\n";
-
-                    if (d.data.key_info.shuffle_type) {
-                        html += "<strong>Shuffle Type:</strong> " + d.data.key_info.shuffle_type + "\n";
-                    }
-                    if (d.data.key_info.partitions) {
-                        html += "<strong>Partitions:</strong> " + d.data.key_info.partitions + "\n";
-                    }
+                    if (d.data.key_info.shuffle_type) html += "<strong>Shuffle Type:</strong> " + escapeHtml(d.data.key_info.shuffle_type) + "\n";
+                    if (d.data.key_info.partitions) html += "<strong>Partitions:</strong> " + escapeHtml(d.data.key_info.partitions) + "\n";
                 }
-
                 if (d.data.key_info.join_type) {
-                    html += "<strong>Join Type:</strong> " + d.data.key_info.join_type;
+                    html += "<strong>Join Type:</strong> " + escapeHtml(d.data.key_info.join_type);
                     if (d.data.key_info.is_broadcast) {
-                        html += " <span style='color: #27ae60;'>📡 BROADCAST (optimized)</span>";
-                        if (d.data.key_info.build_side) {
-                            html += "\n<strong>Build Side:</strong> " + d.data.key_info.build_side;
-                        }
+                        html += " <span style='color: #27ae60;'>\uD83D\uDCE1 BROADCAST (optimized)</span>";
+                        if (d.data.key_info.build_side) html += "\n<strong>Build Side:</strong> " + escapeHtml(d.data.key_info.build_side);
                     }
                     html += "\n";
                 }
-                if (d.data.key_info.condition) {
-                    html += "<strong>Condition:</strong> " + d.data.key_info.condition + "\n";
-                }
-                if (d.data.key_info.table) {
-                    html += "<strong>Table:</strong> " + d.data.key_info.table + "\n";
-                }
-                if (d.data.key_info.format) {
-                    html += "<strong>Format:</strong> " + d.data.key_info.format + "\n";
-                }
+                if (d.data.key_info.condition) html += "<strong>Condition:</strong> " + escapeHtml(d.data.key_info.condition) + "\n";
+                if (d.data.key_info.table) html += "<strong>Table:</strong> " + escapeHtml(d.data.key_info.table) + "\n";
+                if (d.data.key_info.format) html += "<strong>Format:</strong> " + escapeHtml(d.data.key_info.format) + "\n";
                 if (d.data.key_info.pushed_filters && d.data.key_info.pushed_filters.length > 0) {
-                    html += "<strong style='color: #27ae60;'>✓ Pushed Filters:</strong>\n";
-                    d.data.key_info.pushed_filters.forEach(f => {
-                        html += "  • " + f + "\n";
-                    });
+                    html += "<strong style='color: #27ae60;'>\u2713 Pushed Filters:</strong>\n";
+                    d.data.key_info.pushed_filters.forEach(function(f) { html += "  \u2022 " + escapeHtml(f) + "\n"; });
                 }
-                if (d.data.key_info.columns) {
-                    html += "<strong>Columns:</strong> " + d.data.key_info.columns.join(', ') + "\n";
-                }
-                if (d.data.key_info.functions) {
-                    html += "<strong>Functions:</strong> " + d.data.key_info.functions.join(', ') + "\n";
-                }
-                if (d.data.key_info.group_by) {
-                    html += "<strong>Group By:</strong> " + d.data.key_info.group_by.join(', ') + "\n";
-                }
-                if (d.data.key_info.order) {
-                    html += "<strong>Sort Order:</strong> " + d.data.key_info.order + "\n";
-                } html += "</div>";
-                html += "</div>";
+                if (d.data.key_info.columns) html += "<strong>Columns:</strong> " + escapeHtml(d.data.key_info.columns.join(', ')) + "\n";
+                if (d.data.key_info.functions) html += "<strong>Functions:</strong> " + escapeHtml(d.data.key_info.functions.join(', ')) + "\n";
+                if (d.data.key_info.group_by) html += "<strong>Group By:</strong> " + escapeHtml(d.data.key_info.group_by.join(', ')) + "\n";
+                if (d.data.key_info.order) html += "<strong>Sort Order:</strong> " + escapeHtml(d.data.key_info.order) + "\n";
+                html += "</div></div>";
             }
 
             if (desc) {
                 html += "<div class='details-section'>";
                 html += "<div class='details-label'>Full Description</div>";
-                html += "<div class='details-content'>" + desc + "</div>";
+                html += "<div class='details-content'>" + escapeHtml(desc) + "</div>";
                 html += "</div>";
             }
 
             if (d.data.output && d.data.output.length > 0) {
                 html += "<div class='details-section'>";
                 html += "<div class='details-label'>Output Columns</div>";
-                html += "<div class='details-content'>" + d.data.output.join("\n") + "</div>";
+                html += "<div class='details-content'>" + d.data.output.map(escapeHtml).join("\n") + "</div>";
+                html += "</div>";
+            }
+
+            // Show node-level suggestions
+            if (d.data.suggestions && d.data.suggestions.length > 0) {
+                html += "<div class='details-section'>";
+                html += "<div class='details-label'>Suggestions</div>";
+                d.data.suggestions.forEach(function(s) {
+                    var sevClass = s.severity || 'info';
+                    html += "<div class='suggestion-card " + sevClass + "' style='cursor:default'>";
+                    html += "<div class='suggestion-title'>" + escapeHtml(s.title) + "</div>";
+                    html += "<div class='suggestion-message'>" + escapeHtml(s.message) + "</div>";
+                    html += "</div>";
+                });
                 html += "</div>";
             }
 
@@ -729,8 +840,7 @@
             selectedNodeId = null;
         }
 
-        // Zoom Controls
-        const zoomBehavior = d3.zoom().on("zoom", (e) => g.attr("transform", e.transform));
+        // Zoom Controls — use the named zoomBehavior defined above
         const svgSelect = d3.select("svg");
 
         function zoomIn() { svgSelect.transition().call(zoomBehavior.scaleBy, 1.2); }
@@ -741,7 +851,7 @@
         }
 
         // Resize handler
-        window.addEventListener('resize', () => {
+        window.addEventListener('resize', function() {
             width = container.clientWidth;
             height = container.clientHeight;
             svgSelect.attr("width", width).attr("height", height);

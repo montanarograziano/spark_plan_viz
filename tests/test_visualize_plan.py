@@ -220,6 +220,23 @@ class TestParseSparkPlan:
         assert len(result["children"]) == 1
         assert result["children"][0]["name"] == "Filter"
 
+    def test_parse_spark_plan_has_suggestions_field(self) -> None:
+        """Test that parsed nodes include a suggestions field."""
+        mock_df = Mock()
+        mock_plan = Mock()
+        mock_plan.nodeName.return_value = "Filter"
+        mock_plan.verboseStringWithSuffix.return_value = "Filter (id > 10)"
+        mock_plan.output.return_value.iterator.return_value = EmptyIterator()
+        mock_plan.metrics.return_value.iterator.return_value = EmptyIterator()
+        mock_plan.children.return_value.iterator.return_value = EmptyIterator()
+
+        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_plan
+
+        result = _parse_spark_plan(mock_df)
+        assert result is not None
+        assert "suggestions" in result
+        assert result["suggestions"] == []
+
 
 class TestBuildHtmlString:
     """Test the _build_html_string function."""
@@ -235,6 +252,7 @@ class TestBuildHtmlString:
                     "children": [],
                     "metrics": {},
                     "output": [],
+                    "suggestions": [],
                 },
                 ["<!DOCTYPE html>", "Spark Physical Plan", "d3.v7.min.js", "Filter"],
             ),
@@ -246,6 +264,7 @@ class TestBuildHtmlString:
                     "children": [],
                     "metrics": {"rows": 100},
                     "output": ["col1", "col2"],
+                    "suggestions": [],
                 },
                 ["<!DOCTYPE html>", "Spark Physical Plan", "d3.v7.min.js"],
             ),
@@ -269,11 +288,11 @@ class TestBuildHtmlString:
             "children": [],
             "metrics": {},
             "output": [],
+            "suggestions": [],
         }
 
         html = _build_html_string(tree_data)
 
-        # Check for D3.js elements
         required_elements = [
             "d3.select",
             "tree-container",
@@ -284,11 +303,47 @@ class TestBuildHtmlString:
         for element in required_elements:
             assert element in html
 
+    def test_build_html_xss_escaping(self) -> None:
+        """Test that </script> in data does not break the template."""
+        tree_data = {
+            "name": "Root",
+            "description": '</script><script>alert("xss")</script>',
+            "type": "other",
+            "children": [],
+            "metrics": {},
+            "output": [],
+            "suggestions": [],
+        }
+
+        html = _build_html_string(tree_data)
+
+        # The raw </script> must NOT appear unescaped in the JSON blob
+        # (it would prematurely close the script tag)
+        assert "</script><script>alert" not in html
+        # The escaped form should be present
+        assert "<\\/script>" in html
+
+    def test_build_html_has_suggestions_panel(self) -> None:
+        """Test that HTML contains the suggestions panel."""
+        tree_data = {
+            "name": "Root",
+            "description": "",
+            "type": "other",
+            "children": [],
+            "metrics": {},
+            "output": [],
+            "suggestions": [],
+        }
+
+        html = _build_html_string(tree_data)
+        assert "suggestions-panel" in html
+        assert "escapeHtml" in html
+
 
 class TestVisualizePlan:
     """Test the visualize_plan function."""
 
-    @patch("spark_plan_viz.visualize_plan._parse_spark_plan")
+    @patch("spark_plan_viz._renderer._parse_spark_plan")
     @patch("IPython.display.display")
     @patch("IPython.display.IFrame")
     def test_visualize_plan_notebook_mode(
@@ -303,17 +358,20 @@ class TestVisualizePlan:
             "children": [],
             "metrics": {},
             "output": [],
+            "suggestions": [],
         }
         mock_parse.return_value = mock_tree
 
-        visualize_plan(mock_df, notebook=True)
+        result = visualize_plan(mock_df, notebook=True, analyze=False)
 
         mock_parse.assert_called_once_with(mock_df)
         mock_display.assert_called_once()
         mock_iframe.assert_called_once()
+        assert result is not None
+        assert result["name"] == "Test"
 
-    @patch("spark_plan_viz.visualize_plan._parse_spark_plan")
-    @patch("spark_plan_viz.visualize_plan.webbrowser.open")
+    @patch("spark_plan_viz._renderer._parse_spark_plan")
+    @patch("spark_plan_viz._renderer.webbrowser.open")
     @patch("builtins.open", create=True)
     def test_visualize_plan_file_mode(
         self, mock_open: Mock, mock_browser: Mock, mock_parse: Mock
@@ -327,27 +385,31 @@ class TestVisualizePlan:
             "children": [],
             "metrics": {},
             "output": [],
+            "suggestions": [],
         }
         mock_parse.return_value = mock_tree
 
-        visualize_plan(mock_df, notebook=False, output_file="test.html")
+        result = visualize_plan(
+            mock_df, notebook=False, output_file="test.html", analyze=False
+        )
 
         mock_parse.assert_called_once_with(mock_df)
         mock_open.assert_called_once()
         mock_browser.assert_called_once()
+        assert result is not None
 
-    @patch("spark_plan_viz.visualize_plan._parse_spark_plan")
+    @patch("spark_plan_viz._renderer._parse_spark_plan")
     def test_visualize_plan_parse_failure(self, mock_parse: Mock) -> None:
         """Test that function handles parse failure gracefully."""
         mock_df = Mock()
         mock_parse.return_value = None
 
-        # Should not raise exception
-        visualize_plan(mock_df, notebook=True)
+        result = visualize_plan(mock_df, notebook=True)
 
         mock_parse.assert_called_once_with(mock_df)
+        assert result is None
 
-    @patch("spark_plan_viz.visualize_plan._parse_spark_plan")
+    @patch("spark_plan_viz._renderer._parse_spark_plan")
     def test_visualize_plan_notebook_no_ipython(self, mock_parse: Mock) -> None:
         """Test notebook mode handles missing IPython gracefully."""
         import builtins
@@ -360,10 +422,10 @@ class TestVisualizePlan:
             "children": [],
             "metrics": {},
             "output": [],
+            "suggestions": [],
         }
         mock_parse.return_value = mock_tree
 
-        # Mock the import to raise ImportError
         original_import = builtins.__import__
 
         def mock_import(name: str, *args, **kwargs):  # type: ignore
@@ -372,10 +434,30 @@ class TestVisualizePlan:
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
-            # Should not raise exception
-            visualize_plan(mock_df, notebook=True)
+            result = visualize_plan(mock_df, notebook=True, analyze=False)
 
         mock_parse.assert_called_once_with(mock_df)
+        assert result is not None
+
+    def test_visualize_plan_returns_tree(self) -> None:
+        """Test that visualize_plan returns the parsed tree data."""
+        with patch("spark_plan_viz._renderer._parse_spark_plan") as mock_parse:
+            mock_df = Mock()
+            mock_tree = {
+                "name": "Root",
+                "description": "",
+                "type": "other",
+                "children": [],
+                "metrics": {},
+                "output": [],
+                "suggestions": [],
+            }
+            mock_parse.return_value = mock_tree
+
+            with patch("IPython.display.display"), patch("IPython.display.IFrame"):
+                result = visualize_plan(mock_df, notebook=True, analyze=False)
+
+            assert result == mock_tree
 
     @pytest.mark.skipif(
         not PYSPARK_AVAILABLE, reason="PySpark not installed or Java not available"
@@ -413,7 +495,6 @@ class TestVisualizePlan:
         departments_columns = ["dept_name", "division"]
         departments_df = spark.createDataFrame(departments_data, departments_columns)
 
-        # Apply complex transformations with joins, filters, and aggregations
         result_df = (
             employees_df.filter(employees_df.age > 30)
             .join(salaries_df, employees_df.id == salaries_df.emp_id, "inner")
@@ -428,7 +509,10 @@ class TestVisualizePlan:
             .sort("division")
         )
 
-        # This should not raise any exceptions
-        visualize_plan(result_df, notebook=True, output_file="test_real_df.html")
+        # This should not raise any exceptions and should return data
+        result = visualize_plan(
+            result_df, notebook=True, output_file="test_real_df.html"
+        )
+        assert result is not None
 
         spark.stop()
