@@ -1,0 +1,56 @@
+[project]
+site_name = "Spark Plan Viz"
+site_url = "https://montanarograziano.github.io/spark_plan_viz/"
+site_description = "Interactive visualization and optimization analysis for Apache Spark execution plans"
+site_author = "Graziano Montanaro"
+copyright = "Copyright &copy; 2024–2026 Graziano Montanaro"
+
+nav = [
+  {"Home" = "index.md"},
+  {"Getting Started" = "getting-started.md"},
+  {"Installation" = "installation.md"},
+  {"Usage" = [
+    "usage/index.md",
+    "usage/notebook-mode.md",
+    "usage/file-mode.md",
+    "usage/programmatic-api.md",
+  ]},
+  {"Understanding Plans" = [
+    "understanding-plans/index.md",
+    "understanding-plans/node-types.md",
+    "understanding-plans/aqe.md",
+  ]},
+  {"Optimization Reference" = "optimization-reference/index.md"},
+  {"API Reference" = "api-reference.md"},
+  {"Gallery" = "gallery.md"},
+  {"Contributing" = "contributing.md"},
+  {"Changelog" = "changelog.md"},
+]
+
+[project.theme]
+features = [
+  "navigation.tabs",
+  "navigation.tabs.sticky",
+  "navigation.sections",
+  "navigation.path",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.tracking",
+  "content.code.copy",
+  "search.suggest",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "deep-orange"
+accent = "deep-orange"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "deep-orange"
+accent = "deep-orange"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"

@@ -38,6 +38,14 @@ test-all:
     uv run --python 3.13 pytest tests/ -v
     echo "\n✅ All Python versions passed!"
 
+# Build documentation site
+docs-build:
+    uv run zensical build --clean
+
+# Serve documentation site locally
+docs-serve:
+    uv run zensical serve
+
 # Run all checks (lint + mypy)
 check: lint mypy
 
