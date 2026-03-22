@@ -1,6 +1,6 @@
 [project]
 name = "spark-plan-viz"
-version = "0.2.3"
+version = "1.0.0"
 description = "A tool to visualize Apache Spark execution plans."
 readme = "README.md"
 requires-python = ">=3.11"
