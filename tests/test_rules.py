@@ -16,12 +16,14 @@ from spark_plan_viz._rules import (
     FullTableScanRule,
     MissingBroadcastHintRule,
     NestedLoopJoinRule,
+    NonColumnarNoPushdownRule,
     NonColumnarFormatRule,
     PartitionCountRule,
     PythonUDFRule,
     RedundantShuffleRule,
     Severity,
     SkewHintRule,
+    SinglePartitionExchangeRule,
     SortBeforeShuffleRule,
     Suggestion,
     UnnecessarySortRule,
@@ -114,11 +116,25 @@ class TestMissingBroadcastHintRule:
     rule = MissingBroadcastHintRule()
 
     def test_suggests_broadcast_for_sort_merge(self) -> None:
-        node = _make_node(name="SortMergeJoin", node_type="join")
+        node = _make_node(
+            name="SortMergeJoin",
+            node_type="join",
+            key_info={"join_type": "Inner"},
+        )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 1
         assert results[0].severity == Severity.INFO
+
+    def test_skips_join_with_unsupported_type(self) -> None:
+        node = _make_node(
+            name="SortMergeJoin",
+            node_type="join",
+            key_info={"join_type": "FullOuter"},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
 
     def test_skips_broadcast_join(self) -> None:
         node = _make_node(
@@ -134,8 +150,12 @@ class TestMissingBroadcastHintRule:
 class TestFullTableScanRule:
     rule = FullTableScanRule()
 
-    def test_detects_no_pushed_filters(self) -> None:
-        node = _make_node(name="FileScan", node_type="scan")
+    def test_detects_no_pushed_filters_on_pushdown_format(self) -> None:
+        node = _make_node(
+            name="FileScan",
+            node_type="scan",
+            key_info={"format": "PARQUET"},
+        )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 1
@@ -146,6 +166,16 @@ class TestFullTableScanRule:
             name="FileScan",
             node_type="scan",
             key_info={"pushed_filters": ["IsNotNull(id)"]},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
+
+    def test_skips_scan_without_pushdown_format(self) -> None:
+        node = _make_node(
+            name="FileScan",
+            node_type="scan",
+            key_info={"format": "CSV"},
         )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
@@ -240,22 +270,22 @@ class TestSortBeforeShuffleRule:
 class TestNonColumnarFormatRule:
     rule = NonColumnarFormatRule()
 
-    def test_detects_csv(self) -> None:
+    def test_detects_csv_when_pushdown_exists(self) -> None:
         node = _make_node(
             name="FileScan",
             node_type="scan",
-            key_info={"format": "CSV"},
+            key_info={"format": "CSV", "pushed_filters": ["IsNotNull(id)"]},
         )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 1
         assert "CSV" in results[0].title
 
-    def test_detects_json(self) -> None:
+    def test_detects_json_when_pushdown_exists(self) -> None:
         node = _make_node(
             name="FileScan",
             node_type="scan",
-            key_info={"format": "JSON"},
+            key_info={"format": "JSON", "pushed_filters": ["EqualTo(id,1)"]},
         )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
@@ -266,6 +296,41 @@ class TestNonColumnarFormatRule:
             name="FileScan",
             node_type="scan",
             key_info={"format": "PARQUET"},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
+
+    def test_skips_row_based_scan_without_pushdown(self) -> None:
+        node = _make_node(
+            name="FileScan",
+            node_type="scan",
+            key_info={"format": "CSV"},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
+
+
+class TestNonColumnarNoPushdownRule:
+    rule = NonColumnarNoPushdownRule()
+
+    def test_detects_row_based_scan_without_pushdown(self) -> None:
+        node = _make_node(
+            name="FileScan",
+            node_type="scan",
+            key_info={"format": "CSV"},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+        assert results[0].severity == Severity.WARNING
+
+    def test_skips_row_based_scan_with_pushdown(self) -> None:
+        node = _make_node(
+            name="FileScan",
+            node_type="scan",
+            key_info={"format": "JSON", "pushed_filters": ["EqualTo(id,1)"]},
         )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
@@ -356,19 +421,8 @@ class TestPythonUDFRule:
 class TestSkewHintRule:
     rule = SkewHintRule()
 
-    def test_suggests_skew_opt(self) -> None:
+    def test_does_not_fire_without_evidence(self) -> None:
         node = _make_node(name="SortMergeJoin", node_type="join")
-        ctx = _ctx_for(node)
-        results = self.rule.check(node, ctx)
-        assert len(results) == 1
-        assert results[0].severity == Severity.INFO
-
-    def test_skips_if_skew_present(self) -> None:
-        node = _make_node(
-            name="SortMergeJoin",
-            node_type="join",
-            description="SkewJoin optimization applied",
-        )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 0
@@ -442,7 +496,10 @@ class TestUnnecessarySortRule:
 
     def test_detects_unnecessary_sort(self) -> None:
         sort_node = _make_node(name="Sort", node_type="sort")
-        parent = _make_node(name="Project", node_type="project", children=[sort_node])
+        project = _make_node(name="Project", node_type="project", children=[sort_node])
+        parent = _make_node(
+            name="HashAggregate", node_type="aggregate", children=[project]
+        )
         ctx = _build_context(parent)
         results = self.rule.check(sort_node, ctx)
         assert len(results) == 1
@@ -456,6 +513,41 @@ class TestUnnecessarySortRule:
         results = self.rule.check(sort_node, ctx)
         assert len(results) == 0
 
+    def test_skips_terminal_sort_behind_project_and_filter(self) -> None:
+        sort_node = _make_node(name="Sort", node_type="sort")
+        filter_node = _make_node(
+            name="Filter", node_type="filter", children=[sort_node]
+        )
+        root = _make_node(name="Project", node_type="project", children=[filter_node])
+        ctx = _build_context(root)
+        results = self.rule.check(sort_node, ctx)
+        assert len(results) == 0
+
+
+class TestSinglePartitionExchangeRule:
+    rule = SinglePartitionExchangeRule()
+
+    def test_detects_single_partition_exchange(self) -> None:
+        node = _make_node(
+            name="Exchange",
+            node_type="shuffle",
+            description="Exchange SinglePartition",
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+        assert results[0].severity == Severity.WARNING
+
+    def test_skips_multi_partition_exchange(self) -> None:
+        node = _make_node(
+            name="Exchange",
+            node_type="shuffle",
+            description="Exchange hashpartitioning(id, 200)",
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
+
 
 class TestCoalesceRule:
     rule = CoalesceRule()
@@ -465,10 +557,12 @@ class TestCoalesceRule:
             name="Exchange",
             node_type="shuffle",
             description="Exchange RoundRobinPartitioning(10)",
+            key_info={"partitions": "10"},
         )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 1
+        assert "Round-Robin Repartition" in results[0].title
 
     def test_skips_hash_partitioning(self) -> None:
         node = _make_node(
@@ -483,7 +577,11 @@ class TestCoalesceRule:
 
 class TestAttachSuggestions:
     def test_attaches_suggestions_to_nodes(self) -> None:
-        scan = _make_node(name="FileScan", node_type="scan")
+        scan = _make_node(
+            name="FileScan",
+            node_type="scan",
+            key_info={"format": "PARQUET"},
+        )
         root = _make_node(name="Project", node_type="project", children=[scan])
 
         suggestions = _attach_suggestions(root)
@@ -496,7 +594,11 @@ class TestAttachSuggestions:
         assert len(scan["suggestions"]) > 0
 
     def test_deduplicates_suggestions(self) -> None:
-        scan = _make_node(name="FileScan", node_type="scan")
+        scan = _make_node(
+            name="FileScan",
+            node_type="scan",
+            key_info={"format": "PARQUET"},
+        )
         root = _make_node(name="Root", children=[scan])
 
         # Run twice — should not double-up

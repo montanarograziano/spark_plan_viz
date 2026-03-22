@@ -92,17 +92,19 @@ visualize_plan(result)
 
 ---
 
-## Warning: Full Table Scan
+## Warning: No Pushed Filters Detected
 
 Reading a table without pushed filters wastes I/O.
 
 ```python
 # BAD — triggers full_table_scan rule (WARNING)
-result = employees.select("id", "name")
+result = spark.read.parquet("path/to/employees.parquet").select("id", "name")
 visualize_plan(result)
 
 # BETTER — add a filter; on Parquet/ORC it gets pushed to storage
-result = employees.filter(F.col("age") > 30).select("id", "name")
+result = spark.read.parquet("path/to/employees.parquet").filter(
+    F.col("age") > 30
+).select("id", "name")
 visualize_plan(result)
 ```
 
@@ -188,7 +190,7 @@ visualize_plan(result)
 Shuffle joins are expensive when one side is small.
 
 ```python
-# BEFORE — shuffle join (triggers missing_broadcast_hint rule, INFO)
+# BEFORE — supported shuffle join (triggers missing_broadcast_hint rule, INFO)
 spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
 result = employees.join(departments, employees.department == departments.dept_name)
 visualize_plan(result)
@@ -202,12 +204,12 @@ visualize_plan(result)
 
 ---
 
-## Info: Non-Columnar Format (CSV / JSON)
+## Warning: Row-Based Scan Without Pushdown (CSV / JSON)
 
-Row-based formats don't support column pruning or predicate pushdown.
+Row-based formats without pushed filters often lead to expensive scans.
 
 ```python
-# BAD — triggers non_columnar_format rule (INFO)
+# BAD — triggers non_columnar_no_pushdown rule (WARNING)
 csv_df = spark.read.csv("path/to/data.csv", header=True)
 visualize_plan(csv_df)
 
@@ -219,7 +221,7 @@ visualize_plan(pq_df)
 
 ---
 
-## Info: Coalesce via Round-Robin
+## Info: Round-Robin Repartition
 
 `repartition(n)` triggers a full shuffle even when reducing partitions.
 
@@ -235,19 +237,17 @@ visualize_plan(result)
 
 ---
 
-## Info: Skew Optimization Hint
+## Warning: Single-Partition Exchange
 
-SortMergeJoin with skewed keys causes straggler tasks.
+Global exchanges can serialize a stage onto one task.
 
 ```python
-# Triggers skew_hint rule (INFO)
-spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
-result = employees.join(orders, employees.id == orders.emp_id)
-visualize_plan(result)
+# Triggers single_partition_exchange rule (WARNING)
+from pyspark.sql.window import Window
 
-# FIX — enable AQE skew join optimization
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-spark.conf.set("spark.sql.adaptive.enabled", "true")
+window = Window.orderBy("id")
+result = employees.withColumn("rn", F.row_number().over(window))
+visualize_plan(result)
 ```
 
 ---

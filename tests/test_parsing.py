@@ -8,7 +8,9 @@ sys.path.insert(0, "/Users/graziano/GitHub/spark_plan_viz/src")
 from spark_plan_viz.api import (
     _extract_aggregate_functions,
     _extract_filter_condition,
+    _extract_join_condition,
     _extract_join_type,
+    _extract_shuffle_info,
     _extract_selected_columns,
     _extract_table_name,
 )
@@ -36,6 +38,17 @@ def test_filter_extraction():
     print("✓ Filter condition extraction works")
 
 
+def test_join_condition_extraction():
+    equi_desc = "BroadcastHashJoin [id#0], [user_id#10], Inner, BuildRight, false"
+    non_equi_desc = "BroadcastNestedLoopJoin BuildRight, Inner, (salary#1 > amount#2)"
+    explicit_desc = "Join condition: (id#0 = user_id#10)"
+
+    assert _extract_join_condition(equi_desc) is None
+    assert _extract_join_condition(non_equi_desc) == "(salary#1 > amount#2)"
+    assert _extract_join_condition(explicit_desc) == "(id#0 = user_id#10)"
+    print("✓ Join condition extraction works")
+
+
 def test_column_extraction():
     desc = "Project [Name#1, Age#2, Department#5]"
     result = _extract_selected_columns(desc)
@@ -61,3 +74,12 @@ def test_table_extraction():
     assert result1 is not None, f"Expected table name, got {result1}"
     assert result2 is not None, f"Expected table name, got {result2}"
     print(f"✓ Table extraction works: {result1}, {result2}")
+
+
+def test_shuffle_info_extraction():
+    rr_desc = "Exchange RoundRobinPartitioning(10)"
+    hash_desc = "Exchange hashpartitioning(id#1, 200)"
+
+    assert _extract_shuffle_info(rr_desc)["partitions"] == "10"
+    assert _extract_shuffle_info(hash_desc)["partitions"] == "200"
+    print("✓ Shuffle info extraction works")

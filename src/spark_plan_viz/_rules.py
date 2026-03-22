@@ -50,6 +50,17 @@ class Rule(Protocol):
 # Rule implementations
 # ---------------------------------------------------------------------------
 
+_PASS_THROUGH_TYPES = {"project", "filter", "other"}
+_PUSHDOWN_FORMATS = {"PARQUET", "ORC", "DELTA", "AVRO"}
+_ROW_BASED_FORMATS = {"CSV", "JSON"}
+_BROADCASTABLE_JOIN_TYPES = {
+    "Inner",
+    "LeftOuter",
+    "RightOuter",
+    "LeftSemi",
+    "LeftAnti",
+}
+
 
 class CrossJoinRule:
     """Detect cross joins / CartesianProduct — usually unintentional."""
@@ -109,16 +120,19 @@ class MissingBroadcastHintRule:
             return []
         if ki.get("is_broadcast"):
             return []
+        join_type = ki.get("join_type")
+        if join_type and join_type not in _BROADCASTABLE_JOIN_TYPES:
+            return []
         if "SortMerge" in name or "ShuffledHash" in name:
             return [
                 Suggestion(
                     rule_id="missing_broadcast_hint",
                     severity=Severity.INFO,
-                    title="Consider Broadcast Join",
+                    title="Possible Broadcast Join Opportunity",
                     message=(
-                        "This is a shuffle-based join. If one side is small enough "
-                        "(< spark.sql.autoBroadcastJoinThreshold), consider using "
-                        "broadcast() to avoid the shuffle."
+                        "This join is currently shuffle-based. If one side is known to "
+                        "be small enough for broadcast, a broadcast hint may avoid "
+                        "shuffling both sides."
                     ),
                     node_name=name,
                 )
@@ -127,12 +141,14 @@ class MissingBroadcastHintRule:
 
 
 class FullTableScanRule:
-    """Detect scan nodes with no pushed filters."""
+    """Detect pushdown-capable file scans with no pushed filters."""
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "scan":
             return []
         ki = node.get("key_info", {})
+        if ki.get("format", "").upper() not in _PUSHDOWN_FORMATS:
+            return []
         if ki.get("pushed_filters"):
             return []
         name = node.get("name", "")
@@ -140,11 +156,11 @@ class FullTableScanRule:
             Suggestion(
                 rule_id="full_table_scan",
                 severity=Severity.WARNING,
-                title="Full Table Scan",
+                title="No Pushed Filters Detected",
                 message=(
-                    "No pushed filters detected on this scan. Adding filters that can "
-                    "be pushed down (e.g., partition columns, predicate pushdown) will "
-                    "reduce data read."
+                    "This pushdown-capable scan shows no pushed filters. If your query "
+                    "can filter on partition columns or pushdown-friendly predicates, "
+                    "it may reduce data read."
                 ),
                 node_name=name,
             )
@@ -244,16 +260,41 @@ class NonColumnarFormatRule:
             return []
         ki = node.get("key_info", {})
         fmt = ki.get("format", "").upper()
-        if fmt in ("CSV", "JSON"):
+        if fmt in _ROW_BASED_FORMATS and ki.get("pushed_filters"):
             return [
                 Suggestion(
                     rule_id="non_columnar_format",
                     severity=Severity.INFO,
-                    title=f"Non-Columnar Format ({fmt})",
+                    title=f"Row-Based Format ({fmt})",
                     message=(
                         f"Reading data in {fmt} format. Columnar formats like Parquet "
-                        "or ORC support predicate pushdown and column pruning, "
-                        "significantly reducing I/O."
+                        "or ORC often improve pruning and scan efficiency for analytic "
+                        "workloads."
+                    ),
+                    node_name=node.get("name", ""),
+                )
+            ]
+        return []
+
+
+class NonColumnarNoPushdownRule:
+    """Detect row-based scans with no pushed filters."""
+
+    def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
+        if node.get("type") != "scan":
+            return []
+        ki = node.get("key_info", {})
+        fmt = ki.get("format", "").upper()
+        if fmt in _ROW_BASED_FORMATS and not ki.get("pushed_filters"):
+            return [
+                Suggestion(
+                    rule_id="non_columnar_no_pushdown",
+                    severity=Severity.WARNING,
+                    title=f"Row-Based Scan Without Pushdown ({fmt})",
+                    message=(
+                        f"This {fmt} scan has no pushed filters. Row-based formats "
+                        "already limit pruning, so adding selective filters earlier or "
+                        "converting to Parquet/ORC may reduce scan cost."
                     ),
                     node_name=node.get("name", ""),
                 )
@@ -372,25 +413,7 @@ class SkewHintRule:
     """Suggest skew optimization for SortMergeJoin."""
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
-        name = node.get("name", "")
-        desc = node.get("description", "")
-        if "SortMergeJoin" not in name:
-            return []
-        if "skew" in desc.lower() or "SkewJoin" in desc:
-            return []
-        return [
-            Suggestion(
-                rule_id="skew_hint",
-                severity=Severity.INFO,
-                title="Consider Skew Optimization",
-                message=(
-                    "SortMergeJoin can be slow if join keys are skewed. "
-                    "Enable AQE skew join optimization "
-                    "(spark.sql.adaptive.skewJoin.enabled) or add a skew hint."
-                ),
-                node_name=name,
-            )
-        ]
+        return []
 
 
 class WindowWithoutPartitionRule:
@@ -475,11 +498,19 @@ class UnnecessarySortRule:
         parent = context.parent_map.get(node_id)
         if parent is None:
             return []
-        parent_name = parent.get("name", "")
-        if any(kw in parent_name for kw in self._ORDERING_CONSUMERS):
-            return []
-        if parent.get("type") == "shuffle":
-            return []
+        current = parent
+        while current is not None:
+            current_name = current.get("name", "")
+            if any(kw in current_name for kw in self._ORDERING_CONSUMERS):
+                return []
+            if current.get("type") == "shuffle":
+                return []
+            if current.get("type") not in _PASS_THROUGH_TYPES:
+                break
+            grandparent = context.parent_map.get(id(current))
+            if grandparent is None:
+                return []
+            current = grandparent
         return [
             Suggestion(
                 rule_id="unnecessary_sort",
@@ -495,8 +526,32 @@ class UnnecessarySortRule:
         ]
 
 
+class SinglePartitionExchangeRule:
+    """Detect shuffles that collapse work to a single partition."""
+
+    def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
+        if node.get("type") != "shuffle":
+            return []
+        desc = node.get("description", "")
+        name = node.get("name", "")
+        if "SinglePartition" not in desc and "SinglePartition" not in name:
+            return []
+        return [
+            Suggestion(
+                rule_id="single_partition_exchange",
+                severity=Severity.WARNING,
+                title="Single-Partition Exchange",
+                message=(
+                    "This exchange funnels work into a single partition, which can "
+                    "serialize execution and create a bottleneck."
+                ),
+                node_name=name,
+            )
+        ]
+
+
 class CoalesceRule:
-    """Detect RoundRobinPartitioning that reduces partition count (coalesce)."""
+    """Detect RoundRobinPartitioning and explain it as a repartition-style shuffle."""
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
@@ -504,15 +559,22 @@ class CoalesceRule:
         desc = node.get("description", "")
         if "RoundRobinPartitioning" not in desc:
             return []
+        partitions = node.get("key_info", {}).get("partitions")
+        partition_suffix = (
+            f" If this change reduces partitions to {partitions}, consider "
+            "coalesce(n) instead."
+            if partitions
+            else " If this change is only reducing partitions, consider "
+            "coalesce(n) instead."
+        )
         return [
             Suggestion(
                 rule_id="coalesce",
                 severity=Severity.INFO,
-                title="Coalesce via Round-Robin",
+                title="Round-Robin Repartition",
                 message=(
-                    "RoundRobinPartitioning detected — this may be a coalesce() that "
-                    "still triggers a full shuffle. If reducing partition count, "
-                    "consider coalesce(n) which avoids a full shuffle when possible."
+                    "RoundRobinPartitioning usually indicates a repartition-style full "
+                    "shuffle." + partition_suffix
                 ),
                 node_name=node.get("name", ""),
             )
@@ -528,11 +590,12 @@ ALL_RULES: list[Rule] = [
     ExpensiveCollectRule(),
     SortBeforeShuffleRule(),
     NonColumnarFormatRule(),
+    NonColumnarNoPushdownRule(),
     NestedLoopJoinRule(),
     PartitionCountRule(),
     PythonUDFRule(),
-    SkewHintRule(),
     WindowWithoutPartitionRule(),
     UnnecessarySortRule(),
+    SinglePartitionExchangeRule(),
     CoalesceRule(),
 ]

@@ -26,7 +26,22 @@ def _extract_join_type(description: str) -> str | None:
 
 def _extract_join_condition(description: str) -> str | None:
     """Extract join condition from the description."""
-    match = re.search(r"(?:condition|BuildSide):\s*([^\n]+)", description)
+    explicit_match = re.search(r"\bcondition:\s*([^\n]+)", description, re.IGNORECASE)
+    if explicit_match:
+        return explicit_match.group(1).strip()
+
+    line = description.splitlines()[0].strip() if description else ""
+    if not line:
+        return None
+
+    # Physical join nodes often encode the predicate as the final comma-separated
+    # segment, e.g.:
+    #   BroadcastNestedLoopJoin BuildRight, Inner, (salary#1 > amount#2)
+    #   BroadcastHashJoin [...], [...], Inner, BuildRight, false
+    match = re.search(
+        r"(?:,\s*)((?:\([^()\n]+\)|\(\([^)\n]+\)\)|\[[^\]\n]+\]))\s*$",
+        line,
+    )
     if match:
         return match.group(1).strip()
     return None
@@ -128,7 +143,13 @@ def _extract_shuffle_info(description: str) -> dict[str, str]:
     if shuffle_match:
         info["shuffle_type"] = shuffle_match.group(1).capitalize()
 
-    partition_match = re.search(r"(\d+)\s*partitions?", description, re.IGNORECASE)
+    partition_match = re.search(
+        r"(?:partitioning\([^)]*,\s*|RoundRobinPartitioning\()(\d+)\)?",
+        description,
+        re.IGNORECASE,
+    )
+    if not partition_match:
+        partition_match = re.search(r"(\d+)\s*partitions?", description, re.IGNORECASE)
     if partition_match:
         info["partitions"] = partition_match.group(1)
 

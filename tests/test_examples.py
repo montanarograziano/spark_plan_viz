@@ -17,7 +17,11 @@ from __future__ import annotations
 import os
 import tempfile
 
+from pyspark.sql.dataframe import DataFrame
 import pytest
+from pyspark.sql.session import SparkSession
+
+from spark_plan_viz._rules import Suggestion
 
 try:
     from pyspark.sql import SparkSession
@@ -43,7 +47,8 @@ pytestmark = pytest.mark.skipif(
 def spark():
     """Create a local SparkSession shared across all tests in this module."""
     session = (
-        SparkSession.builder.master("local[2]")
+        SparkSession.Builder()
+        .master("local[2]")
         .appName("spark_plan_viz_examples")
         .config("spark.sql.shuffle.partitions", "5")
         .config("spark.ui.enabled", "false")
@@ -55,7 +60,7 @@ def spark():
 
 
 @pytest.fixture(scope="module")
-def employees(spark):
+def employees(spark: SparkSession):
     return spark.createDataFrame(
         [
             (1, "Alice", 34, "Engineering", 95000),
@@ -72,7 +77,7 @@ def employees(spark):
 
 
 @pytest.fixture(scope="module")
-def departments(spark):
+def departments(spark: SparkSession):
     return spark.createDataFrame(
         [
             ("Engineering", "Tech", "US"),
@@ -84,7 +89,7 @@ def departments(spark):
 
 
 @pytest.fixture(scope="module")
-def orders(spark):
+def orders(spark: SparkSession):
     return spark.createDataFrame(
         [
             (1, 1, 100.0, "2024-01-15"),
@@ -103,7 +108,7 @@ def orders(spark):
 # ---------------------------------------------------------------------------
 
 
-def _rule_ids(suggestions):
+def _rule_ids(suggestions: list[Suggestion]) -> list[str]:
     """Extract rule_id strings from a list of Suggestion objects."""
     return [s.rule_id for s in suggestions]
 
@@ -126,7 +131,9 @@ class TestCrossJoinExample:
     indicates a missing join condition.
     """
 
-    def test_cross_join_detected(self, spark, employees, departments):
+    def test_cross_join_detected(
+        self, spark: SparkSession, employees: DataFrame, departments: DataFrame
+    ):
         from spark_plan_viz import Severity, analyze_plan
 
         # BAD: cross join without a condition
@@ -139,7 +146,9 @@ class TestCrossJoinExample:
         cross = next(s for s in suggestions if s.rule_id == "cross_join")
         assert cross.severity == Severity.ERROR
 
-    def test_cross_join_fixed_with_condition(self, spark, employees, departments):
+    def test_cross_join_fixed_with_condition(
+        self, spark: SparkSession, employees: DataFrame, departments: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # GOOD: proper equi-join replaces the cross join
@@ -165,7 +174,9 @@ class TestNestedLoopJoinExample:
     The analyzer flags this as an ERROR because it is O(n*m).
     """
 
-    def test_nested_loop_join_detected(self, spark, employees, orders):
+    def test_nested_loop_join_detected(
+        self, spark: SparkSession, employees: DataFrame, orders: DataFrame
+    ):
         from spark_plan_viz import Severity, analyze_plan
 
         # BAD: non-equality join → BroadcastNestedLoopJoin
@@ -178,7 +189,9 @@ class TestNestedLoopJoinExample:
         nlj = next(s for s in suggestions if s.rule_id == "nested_loop_join")
         assert nlj.severity == Severity.ERROR
 
-    def test_nested_loop_fixed_with_equi_join(self, spark, employees, orders):
+    def test_nested_loop_fixed_with_equi_join(
+        self, spark: SparkSession, employees: DataFrame, orders: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # GOOD: equi-join with optional range filter
@@ -207,32 +220,44 @@ class TestFullTableScanExample:
 
     >>> spark.read.parquet("/data/huge_table").select("id")
 
-    The analyzer flags scans without pushed filters as a WARNING.
+    The analyzer flags pushdown-capable scans without pushed filters as a WARNING.
     """
 
-    def test_full_table_scan_detected(self, spark, employees):
+    def test_full_table_scan_detected(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
-        # BAD: no filter at all → full scan
-        result = employees.select("id", "name")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pq_path = os.path.join(tmpdir, "employees.parquet")
+            employees.write.parquet(pq_path)
 
-        suggestions = analyze_plan(result)
-        ids = _rule_ids(suggestions)
+            # BAD: no filter at all on a pushdown-capable format
+            result = spark.read.parquet(pq_path).select("id", "name")
 
-        assert "full_table_scan" in ids
+            suggestions = analyze_plan(result)
+            ids = _rule_ids(suggestions)
 
-    def test_full_scan_mitigated_with_filter(self, spark, employees):
+            assert "full_table_scan" in ids
+
+    def test_full_scan_mitigated_with_filter(
+        self, spark: SparkSession, employees: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
-        # BETTER: adding a filter gives the optimizer a chance to push it down
-        result = employees.filter(F.col("age") > 30).select("id", "name")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pq_path = os.path.join(tmpdir, "employees.parquet")
+            employees.write.parquet(pq_path)
 
-        # Note: for in-memory DataFrames the filter may not be "pushed"
-        # to storage, but for Parquet/ORC scans it would be.
-        suggestions = analyze_plan(result)
-        # The scan may still appear without pushed filters for in-memory data;
-        # the key point is that the example shows the pattern.
-        assert isinstance(suggestions, list)
+            # BETTER: adding a filter gives Spark a chance to push it down
+            result = (
+                spark.read.parquet(pq_path)
+                .filter(F.col("age") > 30)
+                .select("id", "name")
+            )
+
+            suggestions = analyze_plan(result)
+            ids = _rule_ids(suggestions)
+
+            assert "full_table_scan" not in ids
 
 
 class TestExpensiveCollectExample:
@@ -247,7 +272,7 @@ class TestExpensiveCollectExample:
     The analyzer flags this as a WARNING.
     """
 
-    def test_collect_list_detected(self, spark, employees):
+    def test_collect_list_detected(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         # BAD: collect_list pulls every value into one executor's memory
@@ -260,7 +285,7 @@ class TestExpensiveCollectExample:
 
         assert "expensive_collect" in ids
 
-    def test_collect_set_detected(self, spark, employees):
+    def test_collect_set_detected(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         # BAD: collect_set has the same risk
@@ -273,7 +298,7 @@ class TestExpensiveCollectExample:
 
         assert "expensive_collect" in ids
 
-    def test_safe_aggregate_no_warning(self, spark, employees):
+    def test_safe_aggregate_no_warning(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         # GOOD: standard aggregates are safe
@@ -300,7 +325,9 @@ class TestWindowWithoutPartitionExample:
     The analyzer flags this as a WARNING.
     """
 
-    def test_unpartitioned_window_detected(self, spark, employees):
+    def test_unpartitioned_window_detected(
+        self, spark: SparkSession, employees: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # BAD: global window — everything goes to 1 partition
@@ -312,7 +339,9 @@ class TestWindowWithoutPartitionExample:
 
         assert "window_without_partition" in ids
 
-    def test_partitioned_window_no_warning(self, spark, employees):
+    def test_partitioned_window_no_warning(
+        self, spark: SparkSession, employees: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # GOOD: partitioned window distributes the work
@@ -339,7 +368,7 @@ class TestPythonUDFExample:
     The analyzer flags this as a WARNING.
     """
 
-    def test_python_udf_detected(self, spark, employees):
+    def test_python_udf_detected(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         # BAD: Python UDF for something Spark can do natively
@@ -354,7 +383,9 @@ class TestPythonUDFExample:
 
         assert "python_udf" in ids
 
-    def test_native_function_no_warning(self, spark, employees):
+    def test_native_function_no_warning(
+        self, spark: SparkSession, employees: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # GOOD: use Spark's built-in upper()
@@ -378,7 +409,9 @@ class TestRedundantShuffleExample:
     The analyzer flags back-to-back Exchange nodes as a WARNING.
     """
 
-    def test_double_repartition_detected(self, spark, employees):
+    def test_double_repartition_detected(
+        self, spark: SparkSession, employees: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # BAD: two shuffles survive in the executed plan
@@ -393,7 +426,9 @@ class TestRedundantShuffleExample:
 
         assert "redundant_shuffle" in ids
 
-    def test_single_repartition_no_warning(self, spark, employees):
+    def test_single_repartition_no_warning(
+        self, spark: SparkSession, employees: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # GOOD: single repartition
@@ -420,10 +455,13 @@ class TestMissingBroadcastHintExample:
     >>> large.join(small, "key")           # shuffle join
     >>> large.join(broadcast(small), "key") # broadcast join
 
-    The analyzer flags shuffle-based joins as INFO.
+    The analyzer flags supported shuffle joins as a possible INFO-level
+    opportunity when the join type is compatible with broadcast.
     """
 
-    def test_shuffle_join_flagged(self, spark, employees, departments):
+    def test_shuffle_join_flagged(
+        self, spark: SparkSession, employees: DataFrame, departments: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # Disable auto-broadcast so Spark uses SortMergeJoin
@@ -435,11 +473,13 @@ class TestMissingBroadcastHintExample:
             suggestions = analyze_plan(result)
             ids = _rule_ids(suggestions)
 
-            assert "missing_broadcast_hint" in ids or "skew_hint" in ids
+            assert "missing_broadcast_hint" in ids
         finally:
             spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "10485760")
 
-    def test_broadcast_join_no_flag(self, spark, employees, departments):
+    def test_broadcast_join_no_flag(
+        self, spark: SparkSession, employees: DataFrame, departments: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         # GOOD: explicit broadcast avoids the shuffle
@@ -462,10 +502,10 @@ class TestNonColumnarFormatExample:
     >>> spark.read.csv("data.csv")    # slow
     >>> spark.read.parquet("data.pq") # fast
 
-    The analyzer flags CSV/JSON scans as INFO.
+    The analyzer distinguishes between row-based scans with and without pushdown.
     """
 
-    def test_csv_format_flagged(self, spark, employees):
+    def test_csv_format_flagged(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -477,9 +517,9 @@ class TestNonColumnarFormatExample:
             suggestions = analyze_plan(result)
             ids = _rule_ids(suggestions)
 
-            assert "non_columnar_format" in ids
+            assert "non_columnar_no_pushdown" in ids
 
-    def test_parquet_format_no_flag(self, spark, employees):
+    def test_parquet_format_no_flag(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -496,18 +536,18 @@ class TestNonColumnarFormatExample:
 
 class TestCoalesceExample:
     """
-    Example: repartition() when coalesce() would suffice
-    -----------------------------------------------------
+    Example: repartition() that triggers a full round-robin shuffle
+    ---------------------------------------------------------------
     repartition(n) always triggers a full shuffle, even when reducing
     partitions.  coalesce(n) avoids the shuffle by combining locally.
 
     >>> df.repartition(2)  # full shuffle
     >>> df.coalesce(2)     # no shuffle (narrows partitions locally)
 
-    The analyzer flags RoundRobinPartitioning as INFO.
+    The analyzer flags RoundRobinPartitioning as an INFO-level repartition hint.
     """
 
-    def test_repartition_flagged(self, spark, employees):
+    def test_repartition_flagged(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         # BAD: repartition(2) triggers a full shuffle
@@ -518,7 +558,7 @@ class TestCoalesceExample:
 
         assert "coalesce" in ids
 
-    def test_coalesce_no_flag(self, spark, employees):
+    def test_coalesce_no_flag(self, spark: SparkSession, employees: DataFrame):
         from spark_plan_viz import analyze_plan
 
         # GOOD: coalesce avoids the full shuffle
@@ -532,17 +572,15 @@ class TestCoalesceExample:
 
 class TestSkewHintExample:
     """
-    Example: SortMergeJoin without skew optimization
-    --------------------------------------------------
-    If join keys are unevenly distributed, a few tasks process most
-    of the data ("skew").  AQE can split these hot partitions.
-
-    >>> spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-
-    The analyzer flags SortMergeJoin without skew optimization as INFO.
+    Example: SortMergeJoin is not enough evidence for skew
+    ------------------------------------------------------
+    Join skew depends on runtime key distribution. Without concrete skew
+    evidence, the analyzer should avoid speculative warnings.
     """
 
-    def test_sort_merge_join_skew_hint(self, spark, employees, orders):
+    def test_sort_merge_join_no_skew_hint_without_evidence(
+        self, spark: SparkSession, employees: DataFrame, orders: DataFrame
+    ):
         from spark_plan_viz import analyze_plan
 
         spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
@@ -552,7 +590,7 @@ class TestSkewHintExample:
             suggestions = analyze_plan(result)
             ids = _rule_ids(suggestions)
 
-            assert "skew_hint" in ids
+            assert "skew_hint" not in ids
         finally:
             spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "10485760")
 
@@ -569,7 +607,7 @@ class TestVisualizeWithAnalysis:
     """
 
     def test_visualize_plan_returns_tree_with_suggestions(
-        self, spark, employees, departments
+        self, spark: SparkSession, employees: DataFrame, departments: DataFrame
     ):
         from spark_plan_viz import visualize_plan
 
@@ -602,7 +640,13 @@ class TestVisualizeWithAnalysis:
         assert "cross_join" in rule_ids
         assert "expensive_collect" in rule_ids
 
-    def test_analyze_plan_summary(self, spark, employees, orders, departments):
+    def test_analyze_plan_summary(
+        self,
+        spark: SparkSession,
+        employees: DataFrame,
+        orders: DataFrame,
+        departments: DataFrame,
+    ):
         """
         Demonstrate the programmatic API — the kind of snippet a user
         would run in a notebook to audit their query.

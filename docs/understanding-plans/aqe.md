@@ -29,4 +29,4 @@ Spark Plan Viz drills into query stages and reused exchanges to show the full op
 ## Tips
 
 - Even with AQE, it's useful to review the plan — AQE cannot fix fundamentally inefficient queries (e.g., unnecessary cross joins, Python UDFs)
-- The optimization engine's `SkewHintRule` checks whether skew optimization is in use for SortMergeJoin nodes
+- Runtime statistics from AQE can explain why Spark changed join strategies, coalesced partitions, or optimized skewed data

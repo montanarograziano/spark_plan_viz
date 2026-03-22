@@ -9,7 +9,7 @@ Spark Plan Viz helps data engineers and developers debug complex PySpark queries
 ## Key Features
 
 - **Interactive D3.js visualization** — zoom, pan, click nodes to explore details
-- **14-rule optimization engine** — detects cross joins, missing broadcasts, full table scans, Python UDFs, and more
+- **15-rule optimization engine** — detects cross joins, single-partition exchanges, row-based scans without pushdown, Python UDFs, and more
 - **Jupyter-native** — renders inline without external files
 - **Standalone HTML export** — share visualizations with your team
 - **AQE support** — full support for Adaptive Query Execution
@@ -36,6 +36,6 @@ for s in suggestions:
 ## Next Steps
 
 - [Getting Started](getting-started.md) — install and visualize your first plan in 2 minutes
-- [Optimization Reference](optimization-reference/index.md) — learn about all 14 optimization rules
+- [Optimization Reference](optimization-reference/index.md) — learn about all 15 optimization rules
 - [API Reference](api-reference.md) — full public API documentation
 - [PyPI](https://pypi.org/project/spark-plan-viz/) — package on the Python Package Index

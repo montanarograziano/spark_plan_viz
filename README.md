@@ -7,7 +7,7 @@ A lightweight, interactive tool to visualize and analyze PySpark execution plans
 ## Features
 
 - **Interactive Visualization**: Zoom, pan, and click nodes to explore execution details
-- **14-Rule Optimization Engine**: Detects cross joins, missing broadcasts, full table scans, Python UDFs, and more
+- **15-Rule Optimization Engine**: Detects cross joins, single-partition exchanges, row-based scans without pushdown, Python UDFs, and more
 - **Performance Insights**: Instantly identify shuffles, broadcast joins, and pushed filters
 - **Jupyter Integration**: Renders directly inside notebooks without external files
 - **Standalone HTML**: Export visualizations to share with your team
@@ -80,23 +80,24 @@ visualize_plan(result, notebook=True)
 
 ## What the Optimizer Detects
 
-The built-in analyzer checks for 14 common performance issues:
+The built-in analyzer checks for 15 common performance issues:
 
 | Severity | Rule | What it catches |
 |----------|------|-----------------|
 | ERROR | Cross Join | `df.crossJoin(other)` — Cartesian product |
 | ERROR | Nested Loop Join | Non-equality join condition → O(n*m) |
-| WARNING | Full Table Scan | Scan with no pushed filters |
+| WARNING | No Pushed Filters Detected | Pushdown-capable scan without pushed filters |
 | WARNING | Expensive Collect | `collect_list` / `collect_set` in aggregates |
 | WARNING | Window Without PARTITION BY | Global window → single partition |
 | WARNING | Python UDF | Row-level JVM↔Python serialization |
 | WARNING | Redundant Shuffle | Back-to-back `repartition()` calls |
 | WARNING | Partition Count | < 2 or > 10 000 partitions |
 | WARNING | Sort Before Shuffle | Sort immediately destroyed by shuffle |
-| INFO | Missing Broadcast Hint | Shuffle join where broadcast may help |
-| INFO | Non-Columnar Format | CSV/JSON scan instead of Parquet/ORC |
-| INFO | Coalesce via Round-Robin | `repartition(n)` when `coalesce(n)` suffices |
-| INFO | Skew Hint | SortMergeJoin without skew optimization |
+| WARNING | Row-Based Scan Without Pushdown | CSV/JSON scan with no pushed filters |
+| WARNING | Single-Partition Exchange | Exchange collapses work to one partition |
+| INFO | Possible Broadcast Join Opportunity | Supported shuffle join where broadcast may help |
+| INFO | Row-Based Format | CSV/JSON scan where columnar storage may be faster |
+| INFO | Round-Robin Repartition | `repartition(n)` style shuffle that may be avoidable |
 | INFO | Unnecessary Sort | Sort not consumed by ordering-dependent op |
 
 ```python

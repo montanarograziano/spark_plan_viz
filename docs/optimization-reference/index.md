@@ -1,6 +1,6 @@
 # Optimization Reference
 
-Spark Plan Viz includes a 14-rule optimization engine that analyzes your execution plan and surfaces actionable suggestions. Rules are grouped by severity.
+Spark Plan Viz includes a 15-rule optimization engine that analyzes your execution plan and surfaces actionable suggestions. Rules are grouped by severity.
 
 ---
 
@@ -47,13 +47,13 @@ df1.join(df2, (df1.key == df2.key) & (df1.val > df2.val))
 
 Performance issues that should be investigated.
 
-### Full Table Scan (`full_table_scan`)
+### No Pushed Filters Detected (`full_table_scan`)
 
-**Detects:** Scan nodes with no pushed filters.
+**Detects:** Pushdown-capable scans (for example Parquet/ORC/Delta/Avro) with no pushed filters.
 
-**Why it matters:** Without pushed filters, Spark reads the entire table/file from storage. For large datasets, this wastes I/O and memory.
+**Why it matters:** If a scan format supports predicate pushdown but Spark is not pushing any filters, the engine may read more data than necessary.
 
-**Fix:** Add filter predicates that can be pushed to the storage layer. Partition columns and simple comparisons on columns stored in file metadata are good candidates.
+**Fix:** Add filter predicates that can be pushed to the storage layer. Partition columns and simple comparisons are good candidates.
 
 ---
 
@@ -103,6 +103,16 @@ Performance issues that should be investigated.
 
 ---
 
+### Single-Partition Exchange (`single_partition_exchange`)
+
+**Detects:** Exchange nodes with `SinglePartition`.
+
+**Why it matters:** A single-partition exchange funnels all work through one task, which can serialize the stage and become a bottleneck.
+
+**Fix:** Avoid global operations when possible, or repartition by a meaningful key so the work can stay distributed.
+
+---
+
 ### Python UDF (`python_udf`)
 
 **Detects:** `PythonUDF`, `BatchEvalPython`, or `ArrowEvalPython` nodes.
@@ -138,11 +148,11 @@ Window.partitionBy("user_id").orderBy("date")
 
 Optimization opportunities that may or may not apply to your use case.
 
-### Consider Broadcast Join (`missing_broadcast_hint`)
+### Possible Broadcast Join Opportunity (`missing_broadcast_hint`)
 
-**Detects:** `SortMergeJoin` or `ShuffledHashJoin` where broadcast might help.
+**Detects:** Supported `SortMergeJoin` or `ShuffledHashJoin` plans where the join is still shuffle-based and the join type is compatible with broadcast.
 
-**Why it matters:** If one side of the join is small enough to fit in executor memory, a broadcast join avoids the expensive shuffle on both sides.
+**Why it matters:** If one side of the join is small enough to fit in executor memory, a broadcast join can avoid shuffling both sides. This is a heuristic hint, not a proof that broadcast is appropriate.
 
 **Fix:**
 
@@ -153,15 +163,15 @@ from pyspark.sql.functions import broadcast
 result = large_df.join(broadcast(small_df), "key")
 ```
 
-Or increase `spark.sql.autoBroadcastJoinThreshold` (default 10MB).
+Or increase `spark.sql.autoBroadcastJoinThreshold` if broadcast is appropriate for your workload.
 
 ---
 
-### Non-Columnar Format (`non_columnar_format`)
+### Row-Based Format (`non_columnar_format`)
 
-**Detects:** CSV or JSON format in scan nodes.
+**Detects:** CSV or JSON scans where pushed filters are already present.
 
-**Why it matters:** Row-based formats (CSV, JSON) don't support column pruning or predicate pushdown, so Spark must read and parse the entire file.
+**Why it matters:** Row-based formats often cost more to scan than columnar formats in analytic workloads, even when Spark can still apply some filtering.
 
 **Fix:** Convert to Parquet or ORC:
 
@@ -171,16 +181,16 @@ df.write.parquet("path/to/output")
 
 ---
 
-### Consider Skew Optimization (`skew_hint`)
+### Row-Based Scan Without Pushdown (`non_columnar_no_pushdown`)
 
-**Detects:** `SortMergeJoin` without skew optimization.
+**Detects:** CSV or JSON scans with no pushed filters.
 
-**Why it matters:** If join keys are unevenly distributed, a few tasks process most of the data (skew), causing stragglers.
+**Why it matters:** This combines two concrete signals: the scan is row-based and Spark is not pushing any filters. That often means higher-than-necessary scan cost.
 
-**Fix:** Enable AQE skew join optimization:
+**Fix:** Add selective filters early when possible, or convert the dataset to Parquet/ORC:
 
 ```python
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
+df.write.parquet("path/to/output")
 ```
 
 ---
@@ -195,10 +205,10 @@ spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
 
 ---
 
-### Coalesce via Round-Robin (`coalesce`)
+### Round-Robin Repartition (`coalesce`)
 
 **Detects:** `RoundRobinPartitioning` in shuffle nodes.
 
-**Why it matters:** Round-robin partitioning typically appears from `.repartition(n)` and triggers a full shuffle even when reducing partition count.
+**Why it matters:** Round-robin partitioning usually indicates a repartition-style full shuffle.
 
-**Fix:** Use `.coalesce(n)` instead of `.repartition(n)` when reducing partitions — coalesce avoids a full shuffle by combining partitions locally.
+**Fix:** If the change is only reducing partition count, use `.coalesce(n)` instead of `.repartition(n)` to avoid the full shuffle.

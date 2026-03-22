@@ -66,7 +66,7 @@ src/spark_plan_viz/
   _extractors.py     # Regex-based extraction functions
   _parser.py         # JVM plan traversal via Py4J
   _renderer.py       # HTML generation and visualize_plan()
-  _rules.py          # 14 optimization rules
+  _rules.py          # 15 optimization rules
   _analyzer.py       # Analysis engine
   template.html      # D3.js visualization template
 

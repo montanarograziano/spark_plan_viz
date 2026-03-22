@@ -8,4 +8,4 @@ Spark Plan Viz provides three ways to work with execution plans:
 | [File Mode](file-mode.md) | Sharing HTML with teammates | `visualize_plan(df, notebook=False)` |
 | [Programmatic API](programmatic-api.md) | CI pipelines, automated checks | `analyze_plan(df)` |
 
-All modes parse the same underlying JVM execution plan via Py4J and run the same 14-rule optimization analysis.
+All modes parse the same underlying JVM execution plan via Py4J and run the same 15-rule optimization analysis.
