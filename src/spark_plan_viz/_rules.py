@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -56,11 +57,17 @@ class CrossJoinRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         name = node.get("name", "")
         desc = node.get("description", "")
+        first_line = desc.splitlines()[0] if desc else ""
         ki = node.get("key_info", {})
+        condition = ki.get("condition")
 
         if "NestedLoop" in name or "NestedLoop" in desc:
             return []
+        if "CartesianProduct" in name and "(" in first_line:
+            return []
         if "CartesianProduct" in name or ki.get("join_type") == "Cross":
+            if condition:
+                return []
             return [
                 Suggestion(
                     rule_id="cross_join",
@@ -147,6 +154,8 @@ class FullTableScanRule:
 class RedundantShuffleRule:
     """Detect consecutive Exchange nodes."""
 
+    _PASS_THROUGH_TYPES = {"project", "sort", "filter", "other"}
+
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
             return []
@@ -171,7 +180,7 @@ class RedundantShuffleRule:
                         node_name=node.get("name", ""),
                     )
                 ]
-            if child.get("type") not in {"project", "sort", "filter"}:
+            if child.get("type") not in self._PASS_THROUGH_TYPES:
                 return []
             current = child
         return []
@@ -258,7 +267,19 @@ class NestedLoopJoinRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         name = node.get("name", "")
         desc = node.get("description", "")
-        if "BroadcastNestedLoopJoin" in name or "BroadcastNestedLoopJoin" in desc:
+        first_line = desc.splitlines()[0] if desc else ""
+        ki = node.get("key_info", {})
+
+        if (
+            "BroadcastNestedLoopJoin" in name
+            or "BroadcastNestedLoopJoin" in desc
+            or ("CartesianProduct" in name and "(" in first_line)
+            or (
+                node.get("type") == "join"
+                and ki.get("join_type") == "Cross"
+                and ki.get("condition")
+            )
+        ):
             return [
                 Suggestion(
                     rule_id="nested_loop_join",
@@ -375,6 +396,8 @@ class SkewHintRule:
 class WindowWithoutPartitionRule:
     """Detect Window functions without PARTITION BY."""
 
+    _PASS_THROUGH_TYPES = {"sort", "project", "filter", "other"}
+
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "window":
             return []
@@ -393,6 +416,9 @@ class WindowWithoutPartitionRule:
                     node_name=node.get("name", ""),
                 )
             ]
+        lower_desc = desc.lower()
+        if "partition by" in lower_desc or "partitionby" in lower_desc:
+            return []
 
         current = node
         while len(current.get("children", [])) == 1:
@@ -415,12 +441,11 @@ class WindowWithoutPartitionRule:
                         )
                     ]
                 return []
-            if child.get("type") not in {"sort", "project", "filter"}:
+            if child.get("type") not in self._PASS_THROUGH_TYPES:
                 break
             current = child
 
-        lower_desc = desc.lower()
-        if "partition by" not in lower_desc and "partitionby" not in lower_desc:
+        if re.search(r"windowspecdefinition\([^,]+\s+(?:ASC|DESC)\b", desc):
             return [
                 Suggestion(
                     rule_id="window_without_partition",
@@ -434,6 +459,7 @@ class WindowWithoutPartitionRule:
                     node_name=node.get("name", ""),
                 )
             ]
+
         return []
 
 

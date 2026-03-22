@@ -381,8 +381,12 @@ class TestRedundantShuffleExample:
     def test_double_repartition_detected(self, spark, employees):
         from spark_plan_viz import analyze_plan
 
-        # BAD: two consecutive shuffles
-        result = employees.repartition(10, "department").repartition(5)
+        # BAD: two shuffles survive in the executed plan
+        result = (
+            employees.repartition(10, "department")
+            .sortWithinPartitions("department")
+            .repartition(5)
+        )
 
         suggestions = analyze_plan(result)
         ids = _rule_ids(suggestions)
@@ -576,7 +580,12 @@ class TestVisualizeWithAnalysis:
             .agg(F.collect_list("name").alias("names"))
         )
 
-        tree = visualize_plan(result, notebook=False, output_file="/dev/null")
+        tree = visualize_plan(
+            result,
+            notebook=False,
+            output_file="/dev/null",
+            open_browser=False,
+        )
 
         assert tree is not None
         # Collect all suggestions from the tree

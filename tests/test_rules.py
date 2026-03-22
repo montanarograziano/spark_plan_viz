@@ -99,6 +99,16 @@ class TestCrossJoinRule:
         results = self.rule.check(node, ctx)
         assert len(results) == 0
 
+    def test_skips_cross_join_type_when_condition_present(self) -> None:
+        node = _make_node(
+            name="Join",
+            node_type="join",
+            key_info={"join_type": "Cross", "condition": "(salary > amount)"},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
+
 
 class TestMissingBroadcastHintRule:
     rule = MissingBroadcastHintRule()
@@ -166,6 +176,16 @@ class TestRedundantShuffleRule:
         child = _make_node(name="Exchange", node_type="shuffle")
         project = _make_node(name="Project", node_type="project", children=[child])
         parent = _make_node(name="Exchange", node_type="shuffle", children=[project])
+        ctx = _ctx_for(parent)
+        results = self.rule.check(parent, ctx)
+        assert len(results) == 1
+
+    def test_detects_exchange_behind_wrapper_node(self) -> None:
+        child = _make_node(name="Exchange", node_type="shuffle")
+        wrapper = _make_node(
+            name="WholeStageCodegen", node_type="other", children=[child]
+        )
+        parent = _make_node(name="Exchange", node_type="shuffle", children=[wrapper])
         ctx = _ctx_for(parent)
         results = self.rule.check(parent, ctx)
         assert len(results) == 1
@@ -265,6 +285,16 @@ class TestNestedLoopJoinRule:
     def test_detects_nested_loop_join_in_description(self) -> None:
         node = _make_node(
             name="Join", node_type="join", description="BroadcastNestedLoopJoin"
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+
+    def test_detects_cross_join_with_condition_as_nested_loop(self) -> None:
+        node = _make_node(
+            name="Join",
+            node_type="join",
+            key_info={"join_type": "Cross", "condition": "(salary > amount)"},
         )
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
@@ -390,6 +420,21 @@ class TestWindowWithoutPartitionRule:
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 1
+
+    def test_skips_hash_partitioned_window_behind_wrapper(self) -> None:
+        exchange = _make_node(
+            name="Exchange",
+            node_type="shuffle",
+            description="Exchange hashpartitioning(department#1, 5)",
+        )
+        wrapper = _make_node(
+            name="InputAdapter", node_type="other", children=[exchange]
+        )
+        sort = _make_node(name="Sort", node_type="sort", children=[wrapper])
+        node = _make_node(name="Window", node_type="window", children=[sort])
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
 
 
 class TestUnnecessarySortRule:

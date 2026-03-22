@@ -35,6 +35,7 @@ def visualize_plan(
     notebook: bool = True,
     output_file: str = "spark_plan_viz.html",
     analyze: bool = True,
+    open_browser: bool = True,
 ) -> dict[str, Any] | None:
     """
     Visualize a PySpark DataFrame's physical execution plan.
@@ -46,6 +47,8 @@ def visualize_plan(
         output_file: Name of the output HTML file (used only when notebook=False).
         analyze: If True (default), runs the optimization analyzer and
             attaches suggestions to plan nodes.
+        open_browser: If True (default), opens the saved HTML file in a browser
+            when notebook=False.
 
     Returns:
         The parsed plan tree dict, or None if parsing failed.
@@ -85,6 +88,7 @@ def visualize_plan(
 
         path = os.path.abspath(output_file)
         logger.info("Done! File saved to: %s", path)
-        webbrowser.open("file://" + path)
+        if open_browser:
+            webbrowser.open("file://" + path)
 
     return tree_data

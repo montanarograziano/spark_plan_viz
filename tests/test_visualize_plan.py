@@ -411,6 +411,38 @@ class TestVisualizePlan:
         assert result is not None
 
     @patch("spark_plan_viz._renderer._parse_spark_plan")
+    @patch("spark_plan_viz._renderer.webbrowser.open")
+    @patch("builtins.open", create=True)
+    def test_visualize_plan_file_mode_without_browser(
+        self, mock_open: Mock, mock_browser: Mock, mock_parse: Mock
+    ) -> None:
+        """Test file mode can skip opening the browser."""
+        mock_df = Mock()
+        mock_tree = {
+            "name": "Test",
+            "description": "",
+            "type": "other",
+            "children": [],
+            "metrics": {},
+            "output": [],
+            "suggestions": [],
+        }
+        mock_parse.return_value = mock_tree
+
+        result = visualize_plan(
+            mock_df,
+            notebook=False,
+            output_file="test.html",
+            analyze=False,
+            open_browser=False,
+        )
+
+        mock_parse.assert_called_once_with(mock_df)
+        mock_open.assert_called_once()
+        mock_browser.assert_not_called()
+        assert result is not None
+
+    @patch("spark_plan_viz._renderer._parse_spark_plan")
     def test_visualize_plan_parse_failure(self, mock_parse: Mock) -> None:
         """Test that function handles parse failure gracefully."""
         mock_df = Mock()
