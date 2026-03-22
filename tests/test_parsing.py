@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, "/Users/graziano/GitHub/spark_plan_viz/src")
 
-from spark_plan_viz.visualize_plan import (
+from spark_plan_viz.api import (
     _extract_aggregate_functions,
     _extract_filter_condition,
     _extract_join_type,

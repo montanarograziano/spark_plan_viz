@@ -50,6 +50,24 @@ Parse the execution plan and return optimization suggestions without rendering.
 
 ---
 
+## Low-Level Helpers
+
+Most users should import from the package root:
+
+```python
+from spark_plan_viz import analyze_plan, visualize_plan
+```
+
+For tests, debugging, or advanced integrations, helper functions are re-exported from:
+
+```python
+from spark_plan_viz.api import _parse_spark_plan, _build_html_string
+```
+
+This module also exposes the extractor helpers used by the parser.
+
+---
+
 ## `Suggestion`
 
 ```python

@@ -193,8 +193,9 @@ git commit -m "docs: update installation instructions"
 spark_plan_viz/
 ├── src/
 │   └── spark_plan_viz/
-│       ├── __init__.py
-│       ├── visualize_plan.py  # Main visualization logic
+│       ├── __init__.py        # Public package API
+│       ├── api.py             # Low-level helper re-exports for tests/tools
+│       ├── _renderer.py       # HTML generation and visualize_plan()
 │       └── template.html      # D3.js visualization template
 ├── tests/
 │   └── test_visualize_plan.py # Test suite

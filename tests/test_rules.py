@@ -88,6 +88,17 @@ class TestCrossJoinRule:
         results = self.rule.check(node, ctx)
         assert len(results) == 0
 
+    def test_skips_nested_loop_join_even_if_cross_like(self) -> None:
+        node = _make_node(
+            name="BroadcastNestedLoopJoin",
+            node_type="join",
+            description="BroadcastNestedLoopJoin BuildRight, Cross",
+            key_info={"join_type": "Cross"},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
+
 
 class TestMissingBroadcastHintRule:
     rule = MissingBroadcastHintRule()
@@ -150,6 +161,14 @@ class TestRedundantShuffleRule:
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 0
+
+    def test_detects_exchange_separated_by_project(self) -> None:
+        child = _make_node(name="Exchange", node_type="shuffle")
+        project = _make_node(name="Project", node_type="project", children=[child])
+        parent = _make_node(name="Exchange", node_type="shuffle", children=[project])
+        ctx = _ctx_for(parent)
+        results = self.rule.check(parent, ctx)
+        assert len(results) == 1
 
 
 class TestExpensiveCollectRule:
@@ -242,6 +261,14 @@ class TestNestedLoopJoinRule:
         results = self.rule.check(node, ctx)
         assert len(results) == 1
         assert results[0].severity == Severity.ERROR
+
+    def test_detects_nested_loop_join_in_description(self) -> None:
+        node = _make_node(
+            name="Join", node_type="join", description="BroadcastNestedLoopJoin"
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
 
 
 class TestPartitionCountRule:
@@ -339,6 +366,30 @@ class TestWindowWithoutPartitionRule:
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 0
+
+    def test_skips_hash_partitioned_window_plan(self) -> None:
+        exchange = _make_node(
+            name="Exchange",
+            node_type="shuffle",
+            description="Exchange hashpartitioning(department#1, 5)",
+        )
+        sort = _make_node(name="Sort", node_type="sort", children=[exchange])
+        node = _make_node(name="Window", node_type="window", children=[sort])
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 0
+
+    def test_detects_single_partition_window_plan(self) -> None:
+        exchange = _make_node(
+            name="Exchange",
+            node_type="shuffle",
+            description="Exchange SinglePartition",
+        )
+        sort = _make_node(name="Sort", node_type="sort", children=[exchange])
+        node = _make_node(name="Window", node_type="window", children=[sort])
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
 
 
 class TestUnnecessarySortRule:

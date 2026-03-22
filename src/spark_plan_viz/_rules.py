@@ -58,6 +58,8 @@ class CrossJoinRule:
         desc = node.get("description", "")
         ki = node.get("key_info", {})
 
+        if "NestedLoop" in name or "NestedLoop" in desc:
+            return []
         if "CartesianProduct" in name or ki.get("join_type") == "Cross":
             return [
                 Suggestion(
@@ -148,8 +150,13 @@ class RedundantShuffleRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
             return []
-        children = node.get("children", [])
-        for child in children:
+
+        current = node
+        while True:
+            children = current.get("children", [])
+            if len(children) != 1:
+                return []
+            child = children[0]
             if child.get("type") == "shuffle":
                 return [
                     Suggestion(
@@ -164,6 +171,9 @@ class RedundantShuffleRule:
                         node_name=node.get("name", ""),
                     )
                 ]
+            if child.get("type") not in {"project", "sort", "filter"}:
+                return []
+            current = child
         return []
 
 
@@ -247,7 +257,8 @@ class NestedLoopJoinRule:
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         name = node.get("name", "")
-        if "BroadcastNestedLoopJoin" in name:
+        desc = node.get("description", "")
+        if "BroadcastNestedLoopJoin" in name or "BroadcastNestedLoopJoin" in desc:
             return [
                 Suggestion(
                     rule_id="nested_loop_join",
@@ -368,13 +379,48 @@ class WindowWithoutPartitionRule:
         if node.get("type") != "window":
             return []
         desc = node.get("description", "")
-        # Window without partition: description typically contains
-        # "unspecifiedframe" or "ROWS BETWEEN" without "PARTITION BY"
-        if "partitionBy=[]" in desc or (
-            "PARTITION BY" not in desc.upper()
-            and "partitionBy" not in desc
-            and "partition by" not in desc.lower()
-        ):
+        if "partitionBy=[]" in desc:
+            return [
+                Suggestion(
+                    rule_id="window_without_partition",
+                    severity=Severity.WARNING,
+                    title="Window Without PARTITION BY",
+                    message=(
+                        "Window function without PARTITION BY moves all data to a "
+                        "single partition. Add a PARTITION BY clause to distribute "
+                        "the work."
+                    ),
+                    node_name=node.get("name", ""),
+                )
+            ]
+
+        current = node
+        while len(current.get("children", [])) == 1:
+            child = current["children"][0]
+            if child.get("type") == "shuffle":
+                child_desc = child.get("description", "")
+                child_name = child.get("name", "")
+                if "SinglePartition" in child_desc or "SinglePartition" in child_name:
+                    return [
+                        Suggestion(
+                            rule_id="window_without_partition",
+                            severity=Severity.WARNING,
+                            title="Window Without PARTITION BY",
+                            message=(
+                                "Window function without PARTITION BY moves all data to a "
+                                "single partition. Add a PARTITION BY clause to distribute "
+                                "the work."
+                            ),
+                            node_name=node.get("name", ""),
+                        )
+                    ]
+                return []
+            if child.get("type") not in {"sort", "project", "filter"}:
+                break
+            current = child
+
+        lower_desc = desc.lower()
+        if "partition by" not in lower_desc and "partitionby" not in lower_desc:
             return [
                 Suggestion(
                     rule_id="window_without_partition",

@@ -1,4 +1,4 @@
-"""Backward-compatible re-exports — import from here or from the package root."""
+"""Public low-level API re-exports for parsing and rendering helpers."""
 
 from spark_plan_viz._extractors import (
     _extract_aggregate_functions as _extract_aggregate_functions,

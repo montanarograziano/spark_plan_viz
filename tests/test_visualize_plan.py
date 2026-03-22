@@ -1,8 +1,10 @@
+import os
 from unittest.mock import Mock, patch
 
 import pytest
 
-from spark_plan_viz.visualize_plan import (
+from spark_plan_viz import visualize_plan as package_visualize_plan
+from spark_plan_viz.api import (
     _build_html_string,
     _parse_spark_plan,
     visualize_plan,
@@ -14,6 +16,12 @@ try:
     PYSPARK_AVAILABLE = True
 except ImportError:
     PYSPARK_AVAILABLE = False
+
+JAVA_AVAILABLE = bool(os.environ.get("JAVA_HOME"))
+if JAVA_AVAILABLE:
+    JAVA_AVAILABLE = os.path.exists(
+        os.path.join(os.environ["JAVA_HOME"], "bin", "java")
+    )
 
 
 # Helper classes for mocking Scala-like iterators
@@ -238,6 +246,10 @@ class TestParseSparkPlan:
         assert result["suggestions"] == []
 
 
+def test_package_visualize_plan_remains_callable() -> None:
+    assert callable(package_visualize_plan)
+
+
 class TestBuildHtmlString:
     """Test the _build_html_string function."""
 
@@ -460,7 +472,8 @@ class TestVisualizePlan:
             assert result == mock_tree
 
     @pytest.mark.skipif(
-        not PYSPARK_AVAILABLE, reason="PySpark not installed or Java not available"
+        not PYSPARK_AVAILABLE or not JAVA_AVAILABLE,
+        reason="PySpark not installed or Java not available",
     )
     def test_visualize_plan_real_dataframe(self) -> None:
         """Integration test with a real PySpark DataFrame."""
