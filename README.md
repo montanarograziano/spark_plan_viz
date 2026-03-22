@@ -78,6 +78,41 @@ visualize_plan(result, notebook=True)
 
 ![example visualization](<docs/example.jpeg>)
 
+## What the Optimizer Detects
+
+The built-in analyzer checks for 14 common performance issues:
+
+| Severity | Rule | What it catches |
+|----------|------|-----------------|
+| ERROR | Cross Join | `df.crossJoin(other)` — Cartesian product |
+| ERROR | Nested Loop Join | Non-equality join condition → O(n*m) |
+| WARNING | Full Table Scan | Scan with no pushed filters |
+| WARNING | Expensive Collect | `collect_list` / `collect_set` in aggregates |
+| WARNING | Window Without PARTITION BY | Global window → single partition |
+| WARNING | Python UDF | Row-level JVM↔Python serialization |
+| WARNING | Redundant Shuffle | Back-to-back `repartition()` calls |
+| WARNING | Partition Count | < 2 or > 10 000 partitions |
+| WARNING | Sort Before Shuffle | Sort immediately destroyed by shuffle |
+| INFO | Missing Broadcast Hint | Shuffle join where broadcast may help |
+| INFO | Non-Columnar Format | CSV/JSON scan instead of Parquet/ORC |
+| INFO | Coalesce via Round-Robin | `repartition(n)` when `coalesce(n)` suffices |
+| INFO | Skew Hint | SortMergeJoin without skew optimization |
+| INFO | Unnecessary Sort | Sort not consumed by ordering-dependent op |
+
+```python
+# Quick example: detect a cross join
+result = employees.crossJoin(departments)
+suggestions = analyze_plan(result)
+# → [ERROR] Cross Join Detected: Cross joins produce the Cartesian product ...
+
+# Fix it:
+result = employees.join(departments, employees.department == departments.dept_name)
+suggestions = analyze_plan(result)
+# → no cross_join finding
+```
+
+See the [Gallery](https://montanarograziano.github.io/spark_plan_viz/gallery/) for runnable examples of every rule with bad patterns and fixes.
+
 ## Requirements
 
 - Python 3.11+
