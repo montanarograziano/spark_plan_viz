@@ -1,96 +1,95 @@
 # Release Process
 
-This project uses automated releases via GitHub Actions.
+This project uses **fully automated releases** via [python-semantic-release](https://python-semantic-release.readthedocs.io/) and GitHub Actions. No manual tagging or version bumping is needed.
 
-## Creating a New Release
+## How It Works
 
-1. **Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/)**:
-   ```bash
-   git commit -m "feat: add new feature"
-   git commit -m "fix: resolve bug in visualization"
-   git commit -m "docs: update README"
-   ```
+Every push to `main` triggers the release pipeline:
 
-2. **Create and push a new version tag**:
-   ```bash
-   # Create a new tag (e.g., v1.2.3)
-   git tag v1.2.3
+1. **Tests** run on Python 3.11, 3.12, and 3.13
+2. **python-semantic-release** analyzes commits since the last tag:
+   - `feat:` → **minor** bump (0.2.3 → 0.3.0)
+   - `fix:` → **patch** bump (0.2.3 → 0.2.4)
+   - `feat!:` or `BREAKING CHANGE:` → **major** bump (0.2.3 → 1.0.0)
+   - No releasable commits → **no release**
+3. If a release is needed, PSR:
+   - Bumps `version` in `pyproject.toml`
+   - Syncs `uv.lock`
+   - Creates a release commit and git tag (`v0.3.0`)
+   - Builds the package with `uv build`
+4. **git-cliff** generates the changelog from conventional commits
+5. A **GitHub Release** is created with the changelog
+6. The package is **published to PyPI** via Trusted Publisher (OIDC)
 
-   # Push the tag to GitHub
-   git push origin v1.2.3
-   ```
-
-3. **Automated workflow**:
-   - The `release.yml` GitHub Action will trigger automatically
-   - It will execute the following steps in order:
-     1. **Run Tests**: Execute the full test suite on Python 3.11, 3.12, and 3.13
-     2. **Generate Changelog**: Create changelog from conventional commits using git-cliff
-     3. **Create GitHub Release**: Publish a GitHub Release with the generated changelog
-     4. **Publish to PyPI**: Build and publish the package to PyPI
-
-   If any step fails, the workflow stops and subsequent steps are not executed.
-
-   ```
-   Push Tag (v*.*.*)
-         ↓
-   ┌─────────────────┐
-   │  Run Tests      │ ← Reuses test.yml workflow
-   │  (3.11-3.13)    │
-   └────────┬────────┘
-            ↓ (on success)
-   ┌─────────────────┐
-   │  Generate       │ ← git-cliff from conventional commits
-   │  Changelog      │
-   └────────┬────────┘
-            ↓ (on success)
-   ┌─────────────────┐
-   │  Create GitHub  │ ← GitHub Release with changelog
-   │  Release        │
-   └────────┬────────┘
-            ↓ (on success)
-   ┌─────────────────┐
-   │  Publish to     │ ← uv build + uv publish
-   │  PyPI           │
-   └─────────────────┘
-   ```
+```
+Push to main
+      ↓
+┌─────────────────┐
+│  Run Tests      │ ← Python 3.11–3.13 matrix
+│  (lint + mypy   │
+│   + pytest)     │
+└────────┬────────┘
+         ↓ (on success)
+┌─────────────────┐
+│  Semantic       │ ← Analyzes conventional commits
+│  Release        │ ← Bumps version, creates tag, builds
+└────────┬────────┘
+         ↓ (if released)
+    ┌────┴────┐
+    ↓         ↓
+┌────────┐ ┌──────────┐
+│ git-   │ │ Publish  │
+│ cliff  │ │ to PyPI  │
+│ + GH   │ │ (OIDC)   │
+│ Release│ │          │
+└────────┘ └──────────┘
+```
 
 ## Conventional Commit Types
 
-The changelog is automatically organized by commit type:
+Use [Conventional Commits](https://www.conventionalcommits.org/) in all commit messages:
 
-- `feat:` - New features (🚀 Features)
-- `fix:` - Bug fixes (🐛 Bug Fixes)
-- `docs:` - Documentation changes (📚 Documentation)
-- `perf:` - Performance improvements (⚡ Performance)
-- `refactor:` - Code refactoring (🚜 Refactor)
-- `style:` - Code style changes (🎨 Styling)
-- `test:` - Test changes (🧪 Testing)
-- `chore:` - Maintenance tasks (⚙️ Miscellaneous Tasks)
+| Type | Changelog Group | Version Bump |
+|------|----------------|--------------|
+| `feat:` | Features | Minor |
+| `fix:` | Bug Fixes | Patch |
+| `docs:` | Documentation | — |
+| `perf:` | Performance | Patch |
+| `refactor:` | Refactor | — |
+| `style:` | Styling | — |
+| `test:` | Testing | — |
+| `chore:` | Miscellaneous | — |
 
-## Example Commit Messages
+Only `feat` and `fix` (and breaking changes) trigger a release. Other types are included in the changelog when a release does occur.
+
+## Breaking Changes
 
 ```bash
-# Feature with scope
-git commit -m "feat(visualization): add broadcast join indicator"
+# Breaking change via commit type
+git commit -m "feat!: change visualize_plan return type"
 
-# Breaking change
-git commit -m "feat!: change API structure" -m "BREAKING CHANGE: API now uses new format"
-
-# Bug fix with scope
-git commit -m "fix(template): correct arrow direction in tree"
-
-# Documentation
-git commit -m "docs: update installation instructions"
+# Breaking change via footer
+git commit -m "feat: new API" -m "BREAKING CHANGE: analyze_plan now returns Suggestion objects"
 ```
 
-## Manual Release (if needed)
-
-If you need to create a release manually:
+## Example Commits
 
 ```bash
-# Build the package
-uv build
+git commit -m "feat(rules): add new SpillToDiskRule"
+git commit -m "fix(parser): handle missing verboseStringWithSuffix"
+git commit -m "docs: update optimization reference"
+git commit -m "refactor: simplify extractor functions"
+```
 
-# Publish to PyPI
+## Manual Release (emergency only)
+
+If you need to bypass automation:
+
+```bash
+uv build
 uv publish
 ```
+
+## Configuration
+
+Release behavior is configured in `pyproject.toml` under `[tool.semantic_release]`. Changelog formatting is configured in `cliff.toml`.

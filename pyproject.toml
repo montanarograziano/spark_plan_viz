@@ -1,6 +1,6 @@
 [project]
 name = "spark-plan-viz"
-dynamic = ["version"]
+version = "0.2.3"
 description = "A tool to visualize Apache Spark execution plans."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,14 +13,8 @@ Repository = "https://github.com/montanarograziano/spark_plan_viz"
 Issues = "https://github.com/montanarograziano/spark_plan_viz/issues"
 
 [build-system]
-requires = ["hatchling", "uv-dynamic-versioning"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.uv-dynamic-versioning]
-fallback-version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spark_plan_viz"]
@@ -39,6 +33,29 @@ dev = [
     "ruff>=0.14.6",
     "zensical>=0.0.28",
 ]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+tag_format = "v{version}"
+commit_parser = "conventional"
+commit_message = "chore(release): v{version}"
+commit_author = "github-actions <actions@users.noreply.github.com>"
+build_command = """
+    uv lock --upgrade-package "$PACKAGE_NAME"
+    git add uv.lock
+    uv build
+"""
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.changelog]
+# Disable PSR's built-in changelog — we use git-cliff instead
+mode = "init"
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = ""
 
 [tool.mypy]
 python_version = "3.11"
