@@ -18,11 +18,11 @@ jobs:
       - name: Setup just
         uses: extractions/setup-just@v3
 
-      - name: Install uv
+      - name: Setup uv and Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v6
-
-      - name: Install Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
 
       - name: Install dependencies
         run: just install

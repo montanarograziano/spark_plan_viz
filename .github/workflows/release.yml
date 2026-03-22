@@ -26,7 +26,6 @@ jobs:
 
     permissions:
       contents: write
-      id-token: write
 
     outputs:
       released: ${{ steps.release.outputs.released }}
@@ -35,19 +34,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ github.ref_name }}
 
-      - name: Force branch to workflow SHA
-        run: git reset --hard ${{ github.sha }}
-
-      - name: Install uv
+      - name: Setup uv and Python
         uses: astral-sh/setup-uv@v6
-
-      - name: Install Python
-        run: uv python install 3.13
+        with:
+          python-version: "3.13"
+          enable-cache: true
 
       - name: Semantic Release — version, tag, push
         id: release
@@ -57,22 +52,7 @@ jobs:
           git_committer_name: "github-actions"
           git_committer_email: "actions@users.noreply.github.com"
           changelog: "false"
-          build: "false"
-
-      - name: Sync uv.lock and build
-        if: steps.release.outputs.released == 'true'
-        run: |
-          uv lock --upgrade-package spark-plan-viz
-          uv build
-
-      - name: Commit updated uv.lock
-        if: steps.release.outputs.released == 'true'
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@users.noreply.github.com"
-          git add uv.lock
-          git diff --cached --quiet || git commit -m "chore(release): sync uv.lock for ${{ steps.release.outputs.tag }}"
-          git push origin main
+          build: "true"
 
       - name: Upload build artifacts
         if: steps.release.outputs.released == 'true'
@@ -94,7 +74,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 

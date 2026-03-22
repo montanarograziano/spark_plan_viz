@@ -428,7 +428,7 @@ class TestVisualizePlan:
 
         original_import = builtins.__import__
 
-        def mock_import(name: str, *args, **kwargs):  # type: ignore
+        def mock_import(name: str, *args, **kwargs):
             if name == "IPython.display":
                 raise ImportError("IPython not available")
             return original_import(name, *args, **kwargs)

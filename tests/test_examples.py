@@ -127,7 +127,7 @@ class TestCrossJoinExample:
     """
 
     def test_cross_join_detected(self, spark, employees, departments):
-        from spark_plan_viz import analyze_plan, Severity
+        from spark_plan_viz import Severity, analyze_plan
 
         # BAD: cross join without a condition
         result = employees.crossJoin(departments)
@@ -166,7 +166,7 @@ class TestNestedLoopJoinExample:
     """
 
     def test_nested_loop_join_detected(self, spark, employees, orders):
-        from spark_plan_viz import analyze_plan, Severity
+        from spark_plan_viz import Severity, analyze_plan
 
         # BAD: non-equality join → BroadcastNestedLoopJoin
         result = employees.join(orders, employees.salary > orders.amount)
