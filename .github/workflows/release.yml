@@ -49,7 +49,7 @@ jobs:
       - name: Install Python
         run: uv python install 3.13
 
-      - name: Semantic Release
+      - name: Semantic Release — version, tag, push
         id: release
         uses: python-semantic-release/python-semantic-release@v10.5.3
         with:
@@ -57,6 +57,22 @@ jobs:
           git_committer_name: "github-actions"
           git_committer_email: "actions@users.noreply.github.com"
           changelog: "false"
+          build: "false"
+
+      - name: Sync uv.lock and build
+        if: steps.release.outputs.released == 'true'
+        run: |
+          uv lock --upgrade-package spark-plan-viz
+          uv build
+
+      - name: Commit updated uv.lock
+        if: steps.release.outputs.released == 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add uv.lock
+          git diff --cached --quiet || git commit -m "chore(release): sync uv.lock for ${{ steps.release.outputs.tag }}"
+          git push origin main
 
       - name: Upload build artifacts
         if: steps.release.outputs.released == 'true'

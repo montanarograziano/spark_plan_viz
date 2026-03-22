@@ -40,11 +40,8 @@ tag_format = "v{version}"
 commit_parser = "conventional"
 commit_message = "chore(release): v{version}"
 commit_author = "github-actions <actions@users.noreply.github.com>"
-build_command = """
-    uv lock --upgrade-package "$PACKAGE_NAME"
-    git add uv.lock
-    uv build
-"""
+major_on_zero = false
+build_command = "python -m pip install uv && uv lock --upgrade-package spark-plan-viz && git add uv.lock && uv build"
 
 [tool.semantic_release.branches.main]
 match = "main"
