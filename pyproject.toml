@@ -51,11 +51,9 @@ match = "main"
 prerelease = false
 
 [tool.semantic_release.changelog]
-# Disable PSR's built-in changelog — we use git-cliff instead
+# We use git-cliff for the actual release changelog, but PSR
+# requires a valid changelog config. Keep defaults minimal.
 mode = "init"
-
-[tool.semantic_release.changelog.default_templates]
-changelog_file = ""
 
 [tool.mypy]
 python_version = "3.11"
