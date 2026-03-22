@@ -38,3 +38,4 @@ for s in suggestions:
 - [Getting Started](getting-started.md) — install and visualize your first plan in 2 minutes
 - [Optimization Reference](optimization-reference/index.md) — learn about all 14 optimization rules
 - [API Reference](api-reference.md) — full public API documentation
+- [PyPI](https://pypi.org/project/spark-plan-viz/) — package on the Python Package Index

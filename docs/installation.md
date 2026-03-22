@@ -1,5 +1,7 @@
 # Installation
 
+The package is available on [PyPI](https://pypi.org/project/spark-plan-viz/).
+
 ## Requirements
 
 - Python 3.11+

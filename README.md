@@ -2,7 +2,7 @@
 
 A lightweight, interactive tool to visualize and analyze PySpark execution plans using D3.js. It helps developers and data engineers debug complex queries when the textual result of `df.explain()` is not enough.
 
-**[Documentation](https://montanarograziano.github.io/spark_plan_viz/)** | **[Optimization Reference](https://montanarograziano.github.io/spark_plan_viz/optimization-reference/)**
+**[Documentation](https://montanarograziano.github.io/spark_plan_viz/)** | **[PyPI](https://pypi.org/project/spark-plan-viz/)** | **[Optimization Reference](https://montanarograziano.github.io/spark_plan_viz/optimization-reference/)**
 
 ## Features
 
