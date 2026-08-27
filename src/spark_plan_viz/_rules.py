@@ -7,6 +7,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
+from spark_plan_viz._constants import (
+    BROADCASTABLE_JOIN_TYPES,
+    PARTITION_COUNT_MAX,
+    PARTITION_COUNT_MIN,
+    PASS_THROUGH_TYPES,
+    PUSHDOWN_FORMATS,
+    ROW_BASED_FORMATS,
+    ROW_EXPLODING_GENERATORS,
+)
+
 
 class Severity(Enum):
     ERROR = "error"
@@ -14,7 +24,7 @@ class Severity(Enum):
     INFO = "info"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Suggestion:
     rule_id: str
     severity: Severity
@@ -46,20 +56,58 @@ class Rule(Protocol):
     ) -> list[Suggestion]: ...
 
 
+def _suggest(
+    rule_id: str,
+    severity: Severity,
+    title: str,
+    message: str,
+    node: dict[str, Any],
+) -> Suggestion:
+    return Suggestion(
+        rule_id=rule_id,
+        severity=severity,
+        title=title,
+        message=message,
+        node_name=node.get("name", ""),
+    )
+
+
+def _ki(node: dict[str, Any]) -> dict[str, Any]:
+    return node.get("key_info") or {}
+
+
+def _desc(node: dict[str, Any]) -> str:
+    return node.get("description") or ""
+
+
+def _first_line(text: str) -> str:
+    return text.splitlines()[0] if text else ""
+
+
+# ---------------------------------------------------------------------------
+# Shared suggestion copy
+# ---------------------------------------------------------------------------
+
+_CROSS_JOIN_MSG = (
+    "Cross joins produce the Cartesian product of both sides and "
+    "can explode data volume. Verify this is intentional or add a "
+    "join condition."
+)
+_WINDOW_NO_PART_MSG = (
+    "Window function without PARTITION BY moves all data to a "
+    "single partition. Add a PARTITION BY clause to distribute "
+    "the work."
+)
+_NESTED_LOOP_MSG = (
+    "Nested-loop joins are O(n*m). They usually appear when Spark "
+    "cannot find an equi-join condition. Rewrite the join with "
+    "equality predicates if possible."
+)
+
+
 # ---------------------------------------------------------------------------
 # Rule implementations
 # ---------------------------------------------------------------------------
-
-_PASS_THROUGH_TYPES = {"project", "filter", "other"}
-_PUSHDOWN_FORMATS = {"PARQUET", "ORC", "DELTA", "AVRO"}
-_ROW_BASED_FORMATS = {"CSV", "JSON"}
-_BROADCASTABLE_JOIN_TYPES = {
-    "Inner",
-    "LeftOuter",
-    "RightOuter",
-    "LeftSemi",
-    "LeftAnti",
-}
 
 
 class CrossJoinRule:
@@ -67,43 +115,36 @@ class CrossJoinRule:
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         name = node.get("name", "")
-        desc = node.get("description", "")
-        first_line = desc.splitlines()[0] if desc else ""
-        ki = node.get("key_info", {})
+        desc = _desc(node)
+        first_line = _first_line(desc)
+        ki = _ki(node)
         condition = ki.get("condition")
 
         if "NestedLoop" in name or "NestedLoop" in desc:
             return []
+        # CartesianProduct with a condition is treated as nested-loop style
         if "CartesianProduct" in name and "(" in first_line:
             return []
         if "CartesianProduct" in name or ki.get("join_type") == "Cross":
             if condition:
                 return []
             return [
-                Suggestion(
-                    rule_id="cross_join",
-                    severity=Severity.ERROR,
-                    title="Cross Join Detected",
-                    message=(
-                        "Cross joins produce the Cartesian product of both sides and "
-                        "can explode data volume. Verify this is intentional or add a "
-                        "join condition."
-                    ),
-                    node_name=name,
+                _suggest(
+                    "cross_join",
+                    Severity.ERROR,
+                    "Cross Join Detected",
+                    _CROSS_JOIN_MSG,
+                    node,
                 )
             ]
         if "Cross" in desc and "Join" in name:
             return [
-                Suggestion(
-                    rule_id="cross_join",
-                    severity=Severity.ERROR,
-                    title="Cross Join Detected",
-                    message=(
-                        "Cross joins produce the Cartesian product of both sides and "
-                        "can explode data volume. Verify this is intentional or add a "
-                        "join condition."
-                    ),
-                    node_name=name,
+                _suggest(
+                    "cross_join",
+                    Severity.ERROR,
+                    "Cross Join Detected",
+                    _CROSS_JOIN_MSG,
+                    node,
                 )
             ]
         return []
@@ -114,27 +155,27 @@ class MissingBroadcastHintRule:
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         name = node.get("name", "")
-        ki = node.get("key_info", {})
+        ki = _ki(node)
 
         if node.get("type") != "join":
             return []
-        if ki.get("is_broadcast"):
+        if ki.get("is_broadcast") or ki.get("is_skew"):
             return []
         join_type = ki.get("join_type")
-        if join_type and join_type not in _BROADCASTABLE_JOIN_TYPES:
+        if join_type and join_type not in BROADCASTABLE_JOIN_TYPES:
             return []
         if "SortMerge" in name or "ShuffledHash" in name:
             return [
-                Suggestion(
-                    rule_id="missing_broadcast_hint",
-                    severity=Severity.INFO,
-                    title="Possible Broadcast Join Opportunity",
-                    message=(
+                _suggest(
+                    "missing_broadcast_hint",
+                    Severity.INFO,
+                    "Possible Broadcast Join Opportunity",
+                    (
                         "This join is currently shuffle-based. If one side is known to "
                         "be small enough for broadcast, a broadcast hint may avoid "
                         "shuffling both sides."
                     ),
-                    node_name=name,
+                    node,
                 )
             ]
         return []
@@ -146,23 +187,55 @@ class FullTableScanRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "scan":
             return []
-        ki = node.get("key_info", {})
-        if ki.get("format", "").upper() not in _PUSHDOWN_FORMATS:
+        ki = _ki(node)
+        if ki.get("format", "").upper() not in PUSHDOWN_FORMATS:
             return []
         if ki.get("pushed_filters"):
             return []
+        # Local/in-memory scans are not storage pushdown candidates
         name = node.get("name", "")
+        if any(x in name for x in ("LocalTableScan", "Range", "OneRowRelation")):
+            return []
         return [
-            Suggestion(
-                rule_id="full_table_scan",
-                severity=Severity.WARNING,
-                title="No Pushed Filters Detected",
-                message=(
+            _suggest(
+                "full_table_scan",
+                Severity.WARNING,
+                "No Pushed Filters Detected",
+                (
                     "This pushdown-capable scan shows no pushed filters. If your query "
                     "can filter on partition columns or pushdown-friendly predicates, "
                     "it may reduce data read."
                 ),
-                node_name=name,
+                node,
+            )
+        ]
+
+
+class EmptyPartitionFiltersRule:
+    """Detect partitioned scans that do no partition pruning."""
+
+    def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
+        if node.get("type") != "scan":
+            return []
+        ki = _ki(node)
+        if not ki.get("has_partition_columns"):
+            return []
+        # partition_filters key present and empty → no pruning
+        if "partition_filters" not in ki:
+            return []
+        if ki.get("partition_filters"):
+            return []
+        return [
+            _suggest(
+                "empty_partition_filters",
+                Severity.WARNING,
+                "No Partition Pruning",
+                (
+                    "This scan reads a partitioned table but PartitionFilters is empty. "
+                    "Filter on partition columns (for example date or region) so Spark "
+                    "can skip irrelevant partitions."
+                ),
+                node,
             )
         ]
 
@@ -170,7 +243,7 @@ class FullTableScanRule:
 class RedundantShuffleRule:
     """Detect consecutive Exchange nodes."""
 
-    _PASS_THROUGH_TYPES = {"project", "sort", "filter", "other"}
+    _WALK_TYPES = PASS_THROUGH_TYPES | {"sort", "broadcast", "shuffle_read"}
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
@@ -184,22 +257,21 @@ class RedundantShuffleRule:
             child = children[0]
             if child.get("type") == "shuffle":
                 return [
-                    Suggestion(
-                        rule_id="redundant_shuffle",
-                        severity=Severity.WARNING,
-                        title="Redundant Shuffle",
-                        message=(
+                    _suggest(
+                        "redundant_shuffle",
+                        Severity.WARNING,
+                        "Redundant Shuffle",
+                        (
                             "Back-to-back Exchange nodes detected. The first shuffle "
                             "may be unnecessary — check if repartitioning can be "
                             "consolidated."
                         ),
-                        node_name=node.get("name", ""),
+                        node,
                     )
                 ]
-            if child.get("type") not in self._PASS_THROUGH_TYPES:
+            if child.get("type") not in self._WALK_TYPES:
                 return []
             current = child
-        return []
 
 
 class ExpensiveCollectRule:
@@ -208,20 +280,20 @@ class ExpensiveCollectRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "aggregate":
             return []
-        desc = node.get("description", "").lower()
+        desc = _desc(node).lower()
         if "collect_list" in desc or "collect_set" in desc:
             return [
-                Suggestion(
-                    rule_id="expensive_collect",
-                    severity=Severity.WARNING,
-                    title="Expensive Collect Operation",
-                    message=(
+                _suggest(
+                    "expensive_collect",
+                    Severity.WARNING,
+                    "Expensive Collect Operation",
+                    (
                         "collect_list/collect_set aggregates all values into a single "
                         "executor's memory. For large groups this can cause OOM. "
                         "Consider alternatives like array_agg with limits or "
                         "pre-filtering."
                     ),
-                    node_name=node.get("name", ""),
+                    node,
                 )
             ]
         return []
@@ -233,20 +305,19 @@ class SortBeforeShuffleRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
             return []
-        children = node.get("children", [])
-        for child in children:
+        for child in node.get("children", []):
             if child.get("type") == "sort":
                 return [
-                    Suggestion(
-                        rule_id="sort_before_shuffle",
-                        severity=Severity.WARNING,
-                        title="Sort Before Shuffle",
-                        message=(
+                    _suggest(
+                        "sort_before_shuffle",
+                        Severity.WARNING,
+                        "Sort Before Shuffle",
+                        (
                             "A Sort immediately before an Exchange is usually wasted "
                             "because the shuffle destroys the ordering. Check if the "
                             "sort can be removed or moved after the exchange."
                         ),
-                        node_name=child.get("name", ""),
+                        child,
                     )
                 ]
         return []
@@ -258,20 +329,20 @@ class NonColumnarFormatRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "scan":
             return []
-        ki = node.get("key_info", {})
+        ki = _ki(node)
         fmt = ki.get("format", "").upper()
-        if fmt in _ROW_BASED_FORMATS and ki.get("pushed_filters"):
+        if fmt in ROW_BASED_FORMATS and ki.get("pushed_filters"):
             return [
-                Suggestion(
-                    rule_id="non_columnar_format",
-                    severity=Severity.INFO,
-                    title=f"Row-Based Format ({fmt})",
-                    message=(
+                _suggest(
+                    "non_columnar_format",
+                    Severity.INFO,
+                    f"Row-Based Format ({fmt})",
+                    (
                         f"Reading data in {fmt} format. Columnar formats like Parquet "
                         "or ORC often improve pruning and scan efficiency for analytic "
                         "workloads."
                     ),
-                    node_name=node.get("name", ""),
+                    node,
                 )
             ]
         return []
@@ -283,58 +354,56 @@ class NonColumnarNoPushdownRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "scan":
             return []
-        ki = node.get("key_info", {})
+        ki = _ki(node)
         fmt = ki.get("format", "").upper()
-        if fmt in _ROW_BASED_FORMATS and not ki.get("pushed_filters"):
+        if fmt in ROW_BASED_FORMATS and not ki.get("pushed_filters"):
             return [
-                Suggestion(
-                    rule_id="non_columnar_no_pushdown",
-                    severity=Severity.WARNING,
-                    title=f"Row-Based Scan Without Pushdown ({fmt})",
-                    message=(
+                _suggest(
+                    "non_columnar_no_pushdown",
+                    Severity.WARNING,
+                    f"Row-Based Scan Without Pushdown ({fmt})",
+                    (
                         f"This {fmt} scan has no pushed filters. Row-based formats "
                         "already limit pruning, so adding selective filters earlier or "
                         "converting to Parquet/ORC may reduce scan cost."
                     ),
-                    node_name=node.get("name", ""),
+                    node,
                 )
             ]
         return []
 
 
 class NestedLoopJoinRule:
-    """Detect BroadcastNestedLoopJoin — extremely expensive for large data."""
+    """Detect nested-loop / conditioned Cartesian joins — expensive for large data."""
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         name = node.get("name", "")
-        desc = node.get("description", "")
-        first_line = desc.splitlines()[0] if desc else ""
-        ki = node.get("key_info", {})
+        desc = _desc(node)
+        first_line = _first_line(desc)
+        ki = _ki(node)
 
-        if (
-            "BroadcastNestedLoopJoin" in name
-            or "BroadcastNestedLoopJoin" in desc
+        is_nlj = (
+            "NestedLoopJoin" in name
+            or "NestedLoopJoin" in desc
+            or "ShuffledNestedLoopJoin" in name
             or ("CartesianProduct" in name and "(" in first_line)
             or (
                 node.get("type") == "join"
                 and ki.get("join_type") == "Cross"
                 and ki.get("condition")
             )
-        ):
-            return [
-                Suggestion(
-                    rule_id="nested_loop_join",
-                    severity=Severity.ERROR,
-                    title="Nested Loop Join",
-                    message=(
-                        "BroadcastNestedLoopJoin is an O(n*m) operation. It usually "
-                        "appears when Spark cannot find an equi-join condition. "
-                        "Rewrite the join with equality predicates if possible."
-                    ),
-                    node_name=name,
-                )
-            ]
-        return []
+        )
+        if not is_nlj:
+            return []
+        return [
+            _suggest(
+                "nested_loop_join",
+                Severity.ERROR,
+                "Nested Loop Join",
+                _NESTED_LOOP_MSG,
+                node,
+            )
+        ]
 
 
 class PartitionCountRule:
@@ -343,41 +412,39 @@ class PartitionCountRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
             return []
-        ki = node.get("key_info", {})
-        partitions_str = ki.get("partitions")
+        partitions_str = _ki(node).get("partitions")
         if not partitions_str:
             return []
         try:
             count = int(partitions_str)
-        except ValueError:
+        except (TypeError, ValueError):
             return []
 
-        name = node.get("name", "")
-        if count < 2:
+        if count < PARTITION_COUNT_MIN:
             return [
-                Suggestion(
-                    rule_id="partition_count_low",
-                    severity=Severity.WARNING,
-                    title=f"Very Low Partition Count ({count})",
-                    message=(
+                _suggest(
+                    "partition_count_low",
+                    Severity.WARNING,
+                    f"Very Low Partition Count ({count})",
+                    (
                         "Only 1 partition means no parallelism. Consider increasing "
                         "spark.sql.shuffle.partitions or repartitioning."
                     ),
-                    node_name=name,
+                    node,
                 )
             ]
-        if count > 10000:
+        if count > PARTITION_COUNT_MAX:
             return [
-                Suggestion(
-                    rule_id="partition_count_high",
-                    severity=Severity.WARNING,
-                    title=f"Very High Partition Count ({count})",
-                    message=(
-                        "More than 10,000 partitions can cause excessive task "
-                        "scheduling overhead. Consider coalescing or adjusting "
-                        "spark.sql.shuffle.partitions."
+                _suggest(
+                    "partition_count_high",
+                    Severity.WARNING,
+                    f"Very High Partition Count ({count})",
+                    (
+                        f"More than {PARTITION_COUNT_MAX:,} partitions can cause "
+                        "excessive task scheduling overhead. Consider coalescing or "
+                        "adjusting spark.sql.shuffle.partitions."
                     ),
-                    node_name=name,
+                    node,
                 )
             ]
         return []
@@ -386,59 +453,156 @@ class PartitionCountRule:
 class PythonUDFRule:
     """Detect PythonUDF / BatchEvalPython / ArrowEvalPython nodes."""
 
+    _MARKERS = (
+        "PythonUDF",
+        "BatchEvalPython",
+        "ArrowEvalPython",
+        "FlatMapGroupsInPandas",
+        "MapInPandas",
+        "PythonMapInArrow",
+        "MapInArrow",
+        "FlatMapCoGroupsInPandas",
+    )
+
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         name = node.get("name", "")
-        desc = node.get("description", "")
-        if any(
-            kw in name or kw in desc
-            for kw in ("PythonUDF", "BatchEvalPython", "ArrowEvalPython")
-        ):
+        desc = _desc(node)
+        if any(kw in name or kw in desc for kw in self._MARKERS):
             return [
-                Suggestion(
-                    rule_id="python_udf",
-                    severity=Severity.WARNING,
-                    title="Python UDF Detected",
-                    message=(
+                _suggest(
+                    "python_udf",
+                    Severity.WARNING,
+                    "Python UDF Detected",
+                    (
                         "Python UDFs serialize data between the JVM and Python, "
                         "which is slow. Consider using Spark SQL built-in functions, "
                         "pandas_udf with Arrow, or Spark Expressions instead."
                     ),
-                    node_name=name,
+                    node,
                 )
             ]
         return []
 
 
 class SkewHintRule:
-    """Suggest skew optimization for SortMergeJoin."""
+    """Surface AQE skew-join handling when the plan marks isSkew=true."""
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
-        return []
+        if node.get("type") != "join":
+            return []
+        ki = _ki(node)
+        desc = _desc(node)
+        if not (ki.get("is_skew") or "isSkew=true" in desc.replace(" ", "")):
+            return []
+        return [
+            _suggest(
+                "skew_join",
+                Severity.INFO,
+                "AQE Skew Join Active",
+                (
+                    "This join is marked as skew-optimized by Adaptive Query Execution. "
+                    "Skewed partitions are being split at runtime. If skew persists, "
+                    "consider salting keys or pre-aggregating the heavy side."
+                ),
+                node,
+            )
+        ]
+
+
+class ExpandRule:
+    """Detect Expand from CUBE/ROLLUP/GROUPING SETS or multiple COUNT DISTINCT."""
+
+    def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
+        name = node.get("name", "")
+        if node.get("type") != "expand" and "Expand" not in name:
+            return []
+        groups = _ki(node).get("expand_groups")
+        desc = _desc(node)
+        if groups is None:
+            # Fallback: count projection groups in description
+            groups = (
+                len(re.findall(r"\[[^\[\]]*\]", desc.split("Expand")[-1][:500])) or None
+            )
+
+        if groups is not None and groups >= 2:
+            msg = (
+                f"Expand multiplies each input row by about {groups}x "
+                "(CUBE/ROLLUP/GROUPING SETS or multiple COUNT DISTINCT). "
+                "Large expand factors can dominate shuffle and memory cost. "
+                "Prefer fewer grouping sets, or rewrite multiple COUNT DISTINCT "
+                "into conditional aggregates when possible."
+            )
+        else:
+            msg = (
+                "Expand multiplies rows for CUBE/ROLLUP/GROUPING SETS or multiple "
+                "COUNT DISTINCT. Large expand factors can dominate shuffle and "
+                "memory cost."
+            )
+        return [
+            _suggest(
+                "expand",
+                Severity.WARNING,
+                "Row-Multiplying Expand",
+                msg,
+                node,
+            )
+        ]
+
+
+class GenerateExplodeRule:
+    """Detect Generate nodes that explode arrays/maps into many rows."""
+
+    def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
+        name = node.get("name", "")
+        if node.get("type") != "generate" and "Generate" not in name:
+            return []
+        generator = (_ki(node).get("generator") or "").lower()
+        desc_lower = _desc(node).lower()
+        if generator not in ROW_EXPLODING_GENERATORS:
+            if not any(g in desc_lower for g in ROW_EXPLODING_GENERATORS):
+                return []
+            generator = next(
+                (g for g in ROW_EXPLODING_GENERATORS if g in desc_lower),
+                generator or "explode",
+            )
+        return [
+            _suggest(
+                "generate_explode",
+                Severity.WARNING,
+                f"Row Explosion ({generator})",
+                (
+                    f"{generator}() multiplies rows by collection size and can blow up "
+                    "partition memory. Filter/project before exploding, drop unused "
+                    "columns immediately after, and consider repartitioning if arrays "
+                    "are large."
+                ),
+                node,
+            )
+        ]
 
 
 class WindowWithoutPartitionRule:
     """Detect Window functions without PARTITION BY."""
 
-    _PASS_THROUGH_TYPES = {"sort", "project", "filter", "other"}
+    _WALK_TYPES = PASS_THROUGH_TYPES | {"sort"}
+
+    def _hit(self, node: dict[str, Any]) -> list[Suggestion]:
+        return [
+            _suggest(
+                "window_without_partition",
+                Severity.WARNING,
+                "Window Without PARTITION BY",
+                _WINDOW_NO_PART_MSG,
+                node,
+            )
+        ]
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "window":
             return []
-        desc = node.get("description", "")
+        desc = _desc(node)
         if "partitionBy=[]" in desc:
-            return [
-                Suggestion(
-                    rule_id="window_without_partition",
-                    severity=Severity.WARNING,
-                    title="Window Without PARTITION BY",
-                    message=(
-                        "Window function without PARTITION BY moves all data to a "
-                        "single partition. Add a PARTITION BY clause to distribute "
-                        "the work."
-                    ),
-                    node_name=node.get("name", ""),
-                )
-            ]
+            return self._hit(node)
         lower_desc = desc.lower()
         if "partition by" in lower_desc or "partitionby" in lower_desc:
             return []
@@ -447,41 +611,19 @@ class WindowWithoutPartitionRule:
         while len(current.get("children", [])) == 1:
             child = current["children"][0]
             if child.get("type") == "shuffle":
-                child_desc = child.get("description", "")
+                child_desc = _desc(child)
                 child_name = child.get("name", "")
                 if "SinglePartition" in child_desc or "SinglePartition" in child_name:
-                    return [
-                        Suggestion(
-                            rule_id="window_without_partition",
-                            severity=Severity.WARNING,
-                            title="Window Without PARTITION BY",
-                            message=(
-                                "Window function without PARTITION BY moves all data to a "
-                                "single partition. Add a PARTITION BY clause to distribute "
-                                "the work."
-                            ),
-                            node_name=node.get("name", ""),
-                        )
-                    ]
+                    return self._hit(node)
                 return []
-            if child.get("type") not in self._PASS_THROUGH_TYPES:
+            if child.get("type") not in self._WALK_TYPES:
                 break
             current = child
 
-        if re.search(r"windowspecdefinition\([^,]+\s+(?:ASC|DESC)\b", desc):
-            return [
-                Suggestion(
-                    rule_id="window_without_partition",
-                    severity=Severity.WARNING,
-                    title="Window Without PARTITION BY",
-                    message=(
-                        "Window function without PARTITION BY moves all data to a "
-                        "single partition. Add a PARTITION BY clause to distribute "
-                        "the work."
-                    ),
-                    node_name=node.get("name", ""),
-                )
-            ]
+        if re.search(
+            r"windowspecdefinition\([^,]+\s+(?:ASC|DESC)\b", desc, re.IGNORECASE
+        ):
+            return self._hit(node)
 
         return []
 
@@ -489,39 +631,37 @@ class WindowWithoutPartitionRule:
 class UnnecessarySortRule:
     """Detect Sort not consumed by an ordering-dependent operation."""
 
-    _ORDERING_CONSUMERS = {"SortMergeJoin", "Window", "TakeOrderedAndProject"}
+    _ORDERING_CONSUMERS = ("SortMergeJoin", "Window", "TakeOrderedAndProject")
 
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "sort":
             return []
-        node_id = id(node)
-        parent = context.parent_map.get(node_id)
+        parent = context.parent_map.get(id(node))
         if parent is None:
             return []
-        current = parent
+        current: dict[str, Any] | None = parent
         while current is not None:
             current_name = current.get("name", "")
             if any(kw in current_name for kw in self._ORDERING_CONSUMERS):
                 return []
-            if current.get("type") == "shuffle":
+            if current.get("type") in {"shuffle", "shuffle_read"}:
                 return []
-            if current.get("type") not in _PASS_THROUGH_TYPES:
+            if current.get("type") not in PASS_THROUGH_TYPES:
                 break
-            grandparent = context.parent_map.get(id(current))
-            if grandparent is None:
+            current = context.parent_map.get(id(current))
+            if current is None:
                 return []
-            current = grandparent
         return [
-            Suggestion(
-                rule_id="unnecessary_sort",
-                severity=Severity.INFO,
-                title="Potentially Unnecessary Sort",
-                message=(
+            _suggest(
+                "unnecessary_sort",
+                Severity.INFO,
+                "Potentially Unnecessary Sort",
+                (
                     "This Sort's output does not appear to be consumed by an "
                     "ordering-dependent operation. If final ordering is not needed, "
                     "removing it can save time."
                 ),
-                node_name=node.get("name", ""),
+                node,
             )
         ]
 
@@ -532,20 +672,33 @@ class SinglePartitionExchangeRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
             return []
-        desc = node.get("description", "")
+        desc = _desc(node)
         name = node.get("name", "")
-        if "SinglePartition" not in desc and "SinglePartition" not in name:
+        ki = _ki(node)
+        if (
+            "SinglePartition" not in desc
+            and "SinglePartition" not in name
+            and ki.get("shuffle_type") != "SinglePartition"
+            and ki.get("partitions") != "1"
+        ):
+            return []
+        # partitions==1 from hashpartitioning(x, 1) should still warn via PartitionCount
+        if (
+            "SinglePartition" not in desc
+            and "SinglePartition" not in name
+            and ki.get("shuffle_type") != "SinglePartition"
+        ):
             return []
         return [
-            Suggestion(
-                rule_id="single_partition_exchange",
-                severity=Severity.WARNING,
-                title="Single-Partition Exchange",
-                message=(
+            _suggest(
+                "single_partition_exchange",
+                Severity.WARNING,
+                "Single-Partition Exchange",
+                (
                     "This exchange funnels work into a single partition, which can "
                     "serialize execution and create a bottleneck."
                 ),
-                node_name=name,
+                node,
             )
         ]
 
@@ -556,10 +709,14 @@ class CoalesceRule:
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
             return []
-        desc = node.get("description", "")
-        if "RoundRobinPartitioning" not in desc:
+        desc = _desc(node)
+        ki = _ki(node)
+        if (
+            "RoundRobinPartitioning" not in desc
+            and ki.get("shuffle_type") != "RoundRobin"
+        ):
             return []
-        partitions = node.get("key_info", {}).get("partitions")
+        partitions = ki.get("partitions")
         partition_suffix = (
             f" If this change reduces partitions to {partitions}, consider "
             "coalesce(n) instead."
@@ -568,34 +725,38 @@ class CoalesceRule:
             "coalesce(n) instead."
         )
         return [
-            Suggestion(
-                rule_id="coalesce",
-                severity=Severity.INFO,
-                title="Round-Robin Repartition",
-                message=(
+            _suggest(
+                "coalesce",
+                Severity.INFO,
+                "Round-Robin Repartition",
+                (
                     "RoundRobinPartitioning usually indicates a repartition-style full "
                     "shuffle." + partition_suffix
                 ),
-                node_name=node.get("name", ""),
+                node,
             )
         ]
 
 
-# Registry of all rules
+# Registry of all rules (order is stable for deterministic suggestion lists)
 ALL_RULES: list[Rule] = [
     CrossJoinRule(),
-    MissingBroadcastHintRule(),
+    NestedLoopJoinRule(),
     FullTableScanRule(),
+    EmptyPartitionFiltersRule(),
+    ExpandRule(),
+    GenerateExplodeRule(),
     RedundantShuffleRule(),
     ExpensiveCollectRule(),
     SortBeforeShuffleRule(),
     NonColumnarFormatRule(),
     NonColumnarNoPushdownRule(),
-    NestedLoopJoinRule(),
     PartitionCountRule(),
     PythonUDFRule(),
     WindowWithoutPartitionRule(),
-    UnnecessarySortRule(),
     SinglePartitionExchangeRule(),
+    MissingBroadcastHintRule(),
+    UnnecessarySortRule(),
     CoalesceRule(),
+    SkewHintRule(),
 ]

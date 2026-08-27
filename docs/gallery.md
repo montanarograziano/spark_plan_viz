@@ -92,6 +92,56 @@ visualize_plan(result)
 
 ---
 
+## Warning: Expand (CUBE / multiple COUNT DISTINCT)
+
+```python
+# BAD — triggers expand rule (WARNING): each row is multiplied by grouping sets
+result = employees.cube("department", "age").count()
+visualize_plan(result)
+
+# Also triggers expand — multiple COUNT DISTINCT
+result = employees.groupBy("department").agg(
+    F.countDistinct("id"),
+    F.countDistinct("name"),
+)
+visualize_plan(result)
+```
+
+---
+
+## Warning: explode() Row Explosion
+
+```python
+# BAD — triggers generate_explode rule (WARNING)
+df = employees.withColumn("tags", F.array(F.lit("a"), F.lit("b")))
+result = df.select("id", F.explode("tags").alias("tag"))
+visualize_plan(result)
+
+# BETTER — filter/project first, drop the array immediately after
+result = (
+    employees.select("id", "tags")
+    .select("id", F.explode("tags").alias("tag"))
+)
+```
+
+---
+
+## Warning: No Partition Pruning
+
+```python
+employees.write.partitionBy("department").parquet("/tmp/emp_part")
+
+# BAD — PartitionFilters: [] reads every partition
+result = spark.read.parquet("/tmp/emp_part")
+visualize_plan(result)
+
+# FIX — filter on the partition column
+result = spark.read.parquet("/tmp/emp_part").filter(F.col("department") == "Sales")
+visualize_plan(result)
+```
+
+---
+
 ## Warning: No Pushed Filters Detected
 
 Reading a table without pushed filters wastes I/O.

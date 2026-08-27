@@ -321,10 +321,14 @@
 
         /* Node Type Colors */
         .node.shuffle rect { stroke: #e74c3c; fill: #fadbd8; }
+        .node.shuffle_read rect { stroke: #c0392b; fill: #f5b7b1; }
+        .node.broadcast rect { stroke: #9b59b6; fill: #e8daef; }
         .node.scan rect { stroke: #27ae60; fill: #d5f5e3; }
         .node.join rect { stroke: #8e44ad; fill: #ebdef0; }
         .node.filter rect { stroke: #f39c12; fill: #fdebd0; }
         .node.aggregate rect { stroke: #2980b9; fill: #d6eaf8; }
+        .node.expand rect { stroke: #e67e22; fill: #fdebd0; }
+        .node.generate rect { stroke: #e74c3c; fill: #f9e79f; }
         .node.sort rect { stroke: #d35400; fill: #edbb99; }
         .node.project rect { stroke: #7f8c8d; fill: #eaeded; }
         .node.window rect { stroke: #16a085; fill: #a2d9ce; }
@@ -616,6 +620,9 @@
                         if (d.data.key_info.is_broadcast) {
                             joinText = '\uD83D\uDCE1 Broadcast ' + joinText;
                         }
+                        if (d.data.key_info.is_skew) {
+                            joinText += ' (skew)';
+                        }
                         nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').text(joinText);
                         yOffset += 15;
                     }
@@ -633,6 +640,18 @@
                     }
                     if (d.data.key_info.pushed_filters && d.data.key_info.pushed_filters.length > 0) {
                         nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').style('fill', '#27ae60').text('\u2713 Filters pushed');
+                        yOffset += 15;
+                    }
+                    if (d.data.key_info.has_partition_columns && d.data.key_info.partition_filters && d.data.key_info.partition_filters.length === 0) {
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').style('fill', '#e67e22').text('No partition pruning');
+                        yOffset += 15;
+                    }
+                    if (d.data.key_info.generator) {
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').style('fill', '#e74c3c').text(d.data.key_info.generator + '()');
+                        yOffset += 15;
+                    }
+                    if (d.data.key_info.expand_groups) {
+                        nodeEl.append('text').attr('class', 'node-detail').attr('x', 0).attr('y', yOffset).attr('text-anchor', 'middle').style('fill', '#e67e22').text('Expand x' + d.data.key_info.expand_groups);
                         yOffset += 15;
                     }
                     if (d.data.key_info.is_shuffle) {
@@ -787,6 +806,9 @@
                         html += " <span style='color: #27ae60;'>\uD83D\uDCE1 BROADCAST (optimized)</span>";
                         if (d.data.key_info.build_side) html += "\n<strong>Build Side:</strong> " + escapeHtml(d.data.key_info.build_side);
                     }
+                    if (d.data.key_info.is_skew) {
+                        html += " <span style='color: #e67e22;'>\u26A0\uFE0F SKEW (AQE)</span>";
+                    }
                     html += "\n";
                 }
                 if (d.data.key_info.condition) html += "<strong>Condition:</strong> " + escapeHtml(d.data.key_info.condition) + "\n";
@@ -796,6 +818,16 @@
                     html += "<strong style='color: #27ae60;'>\u2713 Pushed Filters:</strong>\n";
                     d.data.key_info.pushed_filters.forEach(function(f) { html += "  \u2022 " + escapeHtml(f) + "\n"; });
                 }
+                if (d.data.key_info.partition_filters) {
+                    if (d.data.key_info.partition_filters.length > 0) {
+                        html += "<strong style='color: #27ae60;'>\u2713 Partition Filters:</strong>\n";
+                        d.data.key_info.partition_filters.forEach(function(f) { html += "  \u2022 " + escapeHtml(f) + "\n"; });
+                    } else if (d.data.key_info.has_partition_columns) {
+                        html += "<strong style='color: #e67e22;'>Partition Filters:</strong> (none — no partition pruning)\n";
+                    }
+                }
+                if (d.data.key_info.generator) html += "<strong>Generator:</strong> " + escapeHtml(d.data.key_info.generator) + "\n";
+                if (d.data.key_info.expand_groups) html += "<strong>Expand Groups:</strong> " + escapeHtml(String(d.data.key_info.expand_groups)) + "x\n";
                 if (d.data.key_info.columns) html += "<strong>Columns:</strong> " + escapeHtml(d.data.key_info.columns.join(', ')) + "\n";
                 if (d.data.key_info.functions) html += "<strong>Functions:</strong> " + escapeHtml(d.data.key_info.functions.join(', ')) + "\n";
                 if (d.data.key_info.group_by) html += "<strong>Group By:</strong> " + escapeHtml(d.data.key_info.group_by.join(', ')) + "\n";

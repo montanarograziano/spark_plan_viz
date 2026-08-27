@@ -1,6 +1,6 @@
 # Optimization Reference
 
-Spark Plan Viz includes a 15-rule optimization engine that analyzes your execution plan and surfaces actionable suggestions. Rules are grouped by severity.
+Spark Plan Viz includes a 19-rule optimization engine that analyzes your execution plan and surfaces actionable suggestions. Rules are grouped by severity.
 
 ---
 
@@ -49,11 +49,55 @@ Performance issues that should be investigated.
 
 ### No Pushed Filters Detected (`full_table_scan`)
 
-**Detects:** Pushdown-capable scans (for example Parquet/ORC/Delta/Avro) with no pushed filters.
+**Detects:** Pushdown-capable scans (for example Parquet/ORC/Delta/Avro/Iceberg) with no pushed filters.
 
 **Why it matters:** If a scan format supports predicate pushdown but Spark is not pushing any filters, the engine may read more data than necessary.
 
 **Fix:** Add filter predicates that can be pushed to the storage layer. Partition columns and simple comparisons are good candidates.
+
+---
+
+### No Partition Pruning (`empty_partition_filters`)
+
+**Detects:** File scans over a partitioned table where `PartitionFilters: []`.
+
+**Why it matters:** Without partition filters Spark must list and open every partition directory. On large date-partitioned lakes this dominates job time before any data is read.
+
+**Fix:** Filter on partition columns early:
+
+```python
+# Bad — reads every department partition
+spark.read.parquet("/data/employees")
+
+# Better — prunes to one partition
+spark.read.parquet("/data/employees").filter(F.col("department") == "Sales")
+```
+
+---
+
+### Row-Multiplying Expand (`expand`)
+
+**Detects:** `Expand` nodes from `CUBE` / `ROLLUP` / `GROUPING SETS` or multiple `COUNT(DISTINCT ...)`.
+
+**Why it matters:** Expand multiplies each input row by the number of grouping sets (for a 2-column cube that is 4x). The inflated rows then shuffle and aggregate, which can dominate memory and network cost.
+
+**Fix:**
+- Prefer fewer grouping sets when possible
+- Rewrite multiple `COUNT(DISTINCT x)` into conditional aggregates or separate queries when expand factors are large
+- Pre-aggregate before the cube/rollup when the grain allows it
+
+---
+
+### Row Explosion (`generate_explode`)
+
+**Detects:** `Generate` nodes with `explode` / `posexplode` / `inline` / `stack`.
+
+**Why it matters:** Exploding arrays multiplies rows by collection size. Wide rows plus large arrays often cause partition OOMs and massive shuffles downstream.
+
+**Fix:**
+- Filter and project before exploding
+- Drop the array column immediately after explode
+- Repartition before explode when arrays are large
 
 ---
 
@@ -164,6 +208,16 @@ result = large_df.join(broadcast(small_df), "key")
 ```
 
 Or increase `spark.sql.autoBroadcastJoinThreshold` if broadcast is appropriate for your workload.
+
+---
+
+### AQE Skew Join Active (`skew_join`)
+
+**Detects:** Joins marked with AQE skew handling (`isSkew=true` on `SortMergeJoin`).
+
+**Why it matters:** This is informational — Adaptive Query Execution already split skewed partitions. If the job is still slow on that join, residual skew may remain.
+
+**Fix:** If skew persists after AQE, salt hot keys, pre-aggregate the heavy side, or raise AQE skew thresholds carefully.
 
 ---
 

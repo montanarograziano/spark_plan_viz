@@ -92,3 +92,6 @@ spark-warehouse/
 *.tmp
 *.bak
 site/
+
+# karva cache
+.karva_cache/

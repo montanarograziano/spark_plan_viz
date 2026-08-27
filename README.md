@@ -7,11 +7,11 @@ A lightweight, interactive tool to visualize and analyze PySpark execution plans
 ## Features
 
 - **Interactive Visualization**: Zoom, pan, and click nodes to explore execution details
-- **15-Rule Optimization Engine**: Detects cross joins, single-partition exchanges, row-based scans without pushdown, Python UDFs, and more
-- **Performance Insights**: Instantly identify shuffles, broadcast joins, and pushed filters
+- **19-Rule Optimization Engine**: Detects cross joins, Expand/CUBE blow-ups, explode row multiplication, missed partition pruning, single-partition exchanges, Python UDFs, and more
+- **Performance Insights**: Instantly identify shuffles, broadcast joins, pushed filters, and AQE skew joins
 - **Jupyter Integration**: Renders directly inside notebooks without external files
 - **Standalone HTML**: Export visualizations to share with your team
-- **AQE Support**: Full support for Adaptive Query Execution details
+- **Spark 3.5 & 4.x**: Full Adaptive Query Execution (AQE) support, including `AQEShuffleRead`
 
 ## Installation
 
@@ -80,22 +80,26 @@ visualize_plan(result, notebook=True)
 
 ## What the Optimizer Detects
 
-The built-in analyzer checks for 15 common performance issues:
+The built-in analyzer checks for 19 common performance issues:
 
 | Severity | Rule | What it catches |
 |----------|------|-----------------|
 | ERROR | Cross Join | `df.crossJoin(other)` — Cartesian product |
 | ERROR | Nested Loop Join | Non-equality join condition → O(n*m) |
 | WARNING | No Pushed Filters Detected | Pushdown-capable scan without pushed filters |
+| WARNING | No Partition Pruning | Partitioned table with empty `PartitionFilters` |
+| WARNING | Row-Multiplying Expand | CUBE/ROLLUP/GROUPING SETS or multiple `countDistinct` |
+| WARNING | Row Explosion (`explode`) | `Generate explode` / `posexplode` / `inline` |
 | WARNING | Expensive Collect | `collect_list` / `collect_set` in aggregates |
 | WARNING | Window Without PARTITION BY | Global window → single partition |
-| WARNING | Python UDF | Row-level JVM↔Python serialization |
+| WARNING | Python UDF | Row-level JVM↔Python serialization (incl. pandas map-in-arrow) |
 | WARNING | Redundant Shuffle | Back-to-back `repartition()` calls |
 | WARNING | Partition Count | < 2 or > 10 000 partitions |
 | WARNING | Sort Before Shuffle | Sort immediately destroyed by shuffle |
 | WARNING | Row-Based Scan Without Pushdown | CSV/JSON scan with no pushed filters |
 | WARNING | Single-Partition Exchange | Exchange collapses work to one partition |
 | INFO | Possible Broadcast Join Opportunity | Supported shuffle join where broadcast may help |
+| INFO | AQE Skew Join Active | Join marked `isSkew=true` by Adaptive Query Execution |
 | INFO | Row-Based Format | CSV/JSON scan where columnar storage may be faster |
 | INFO | Round-Robin Repartition | `repartition(n)` style shuffle that may be avoidable |
 | INFO | Unnecessary Sort | Sort not consumed by ordering-dependent op |
@@ -117,7 +121,7 @@ See the [Gallery](https://montanarograziano.github.io/spark_plan_viz/gallery/) f
 ## Requirements
 
 - Python 3.11+
-- PySpark 3.x+
+- PySpark 3.5+ (Spark 4.x supported)
 - For notebook mode: IPython/Jupyter
 
 ## Limitations

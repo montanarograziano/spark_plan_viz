@@ -38,6 +38,10 @@ test-all:
     uv run --python 3.13 pytest tests/ -v
     echo "\n✅ All Python versions passed!"
 
+# Run the suite against a specific PySpark version (e.g. just test-spark 4.0.1)
+test-spark VERSION:
+    uv run --with "pyspark=={{VERSION}}" pytest tests/ -v
+
 # Build documentation site
 docs-build:
     uv run zensical build --clean

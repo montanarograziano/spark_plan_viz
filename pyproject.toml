@@ -27,9 +27,11 @@ packages = ["src/spark_plan_viz"]
 dev = [
     "git-cliff>=2.10.1",
     "ipykernel>=7.1.0",
+    "karva>=0.0.1a4",
     "mypy>=1.18.2",
     "prek>=0.2.18",
-    "pyspark==3.5.6",
+    # Compatible with Spark 3.5 and 4.x; lockfile pins a concrete 3.5.x for CI stability.
+    "pyspark>=3.5.0,<5",
     "pytest>=9.0.1",
     "ruff>=0.14.6",
     "zensical>=0.0.28",
@@ -52,6 +54,24 @@ prerelease = false
 # We use git-cliff for the actual release changelog, but PSR
 # requires a valid changelog config. Keep defaults minimal.
 mode = "init"
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Keep the default rule set focused; Py4J traversal intentionally catches broad exceptions.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "B904",   # raise-from noise in Py4J fallbacks
+    "SIM105", # contextlib.suppress less clear for multi-step JVM fallbacks
+    "SIM108", # ternary vs if often less readable here
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/spark_plan_viz/api.py" = ["F401"]  # re-export surface
+"src/spark_plan_viz/__init__.py" = ["F401"]
 
 [tool.mypy]
 python_version = "3.11"
