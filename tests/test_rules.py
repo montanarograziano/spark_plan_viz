@@ -261,6 +261,17 @@ class TestSortBeforeShuffleRule:
         results = self.rule.check(exchange, ctx)
         assert len(results) == 1
 
+    def test_detects_sort_behind_wholestage_codegen(self) -> None:
+        sort_node = _make_node(name="Sort", node_type="sort")
+        codegen = _make_node(
+            name="WholeStageCodegen", node_type="other", children=[sort_node]
+        )
+        exchange = _make_node(name="Exchange", node_type="shuffle", children=[codegen])
+        ctx = _ctx_for(exchange)
+        results = self.rule.check(exchange, ctx)
+        assert len(results) == 1
+        assert results[0].rule_id == "sort_before_shuffle"
+
     def test_skips_non_sort_child(self) -> None:
         filter_node = _make_node(name="Filter", node_type="filter")
         exchange = _make_node(

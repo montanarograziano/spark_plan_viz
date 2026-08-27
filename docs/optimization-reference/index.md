@@ -255,7 +255,17 @@ df.write.parquet("path/to/output")
 
 **Why it matters:** Sorts are expensive (O(n log n)). If the sorted order isn't used by a downstream operator, the sort is wasted work.
 
-**Fix:** Remove the `.sort()` or `.orderBy()` call if it's not needed for the final output.
+**Example:** `orderBy` before `dropDuplicates` often leaves a Sort that does not affect the dedupe keys.
+
+**Fix:** Remove the `.sort()` or `.orderBy()` call if it's not needed for the final output:
+
+```python
+# Bad — Sort may survive under Aggregate/Deduplicate
+df.orderBy("salary").dropDuplicates(["department"])
+
+# Better
+df.dropDuplicates(["department"])
+```
 
 ---
 

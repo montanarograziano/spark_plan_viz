@@ -302,10 +302,21 @@ class ExpensiveCollectRule:
 class SortBeforeShuffleRule:
     """Detect Sort immediately followed by Exchange — the sort is wasted."""
 
+    # WholeStageCodegen / InputAdapter often wrap the Sort under an Exchange.
+    _WALK_TYPES = PASS_THROUGH_TYPES | {"broadcast", "shuffle_read"}
+
     def check(self, node: dict[str, Any], context: AnalysisContext) -> list[Suggestion]:
         if node.get("type") != "shuffle":
             return []
-        for child in node.get("children", []):
+
+        stack = list(node.get("children", []))
+        seen: set[int] = set()
+        while stack:
+            child = stack.pop()
+            cid = id(child)
+            if cid in seen:
+                continue
+            seen.add(cid)
             if child.get("type") == "sort":
                 return [
                     _suggest(
@@ -320,6 +331,8 @@ class SortBeforeShuffleRule:
                         child,
                     )
                 ]
+            if child.get("type") in self._WALK_TYPES:
+                stack.extend(child.get("children", []))
         return []
 
 

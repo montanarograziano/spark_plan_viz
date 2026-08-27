@@ -116,7 +116,7 @@ suggestions = analyze_plan(result)
 # → no cross_join finding
 ```
 
-See the [Gallery](https://montanarograziano.github.io/spark_plan_viz/gallery/) for runnable examples of every rule with bad patterns and fixes.
+See the [Gallery](https://montanarograziano.github.io/spark_plan_viz/gallery/) for runnable examples of every rule with bad patterns and fixes, or open [`notebooks/example.ipynb`](notebooks/example.ipynb) for an interactive walkthrough (including Expand, explode, partition pruning, and AQE skew).
 
 ## Requirements
 
