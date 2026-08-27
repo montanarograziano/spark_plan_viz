@@ -48,6 +48,9 @@ coverage.xml
 # Jupyter Notebook
 .ipynb_checkpoints
 *.ipynb
+# Keep the published example gallery notebook
+!notebooks/
+!notebooks/**/*.ipynb
 
 # IPython
 profile_default/
@@ -92,3 +95,6 @@ spark-warehouse/
 *.tmp
 *.bak
 site/
+
+# karva cache
+.karva_cache/

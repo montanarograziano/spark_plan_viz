@@ -17,8 +17,8 @@ from __future__ import annotations
 import os
 import tempfile
 
-from pyspark.sql.dataframe import DataFrame
 import pytest
+from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.session import SparkSession
 
 from spark_plan_viz._rules import Suggestion
@@ -590,9 +590,91 @@ class TestSkewHintExample:
             suggestions = analyze_plan(result)
             ids = _rule_ids(suggestions)
 
+            assert "skew_join" not in ids
             assert "skew_hint" not in ids
         finally:
             spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "10485760")
+
+
+class TestExpandExample:
+    """
+    Example: Expand from CUBE / multiple COUNT DISTINCT
+    ----------------------------------------------------
+    CUBE/ROLLUP and multiple COUNT DISTINCT introduce an Expand operator
+    that multiplies each input row.
+
+    >>> df.cube("a", "b").count()
+    """
+
+    def test_cube_expand_detected(self, spark: SparkSession, employees: DataFrame):
+        from spark_plan_viz import analyze_plan
+
+        result = employees.cube("department", "age").count()
+        suggestions = analyze_plan(result)
+        assert "expand" in _rule_ids(suggestions)
+
+    def test_multi_count_distinct_expand_detected(
+        self, spark: SparkSession, employees: DataFrame
+    ):
+        from spark_plan_viz import analyze_plan
+
+        result = employees.groupBy("department").agg(
+            F.countDistinct("id"),
+            F.countDistinct("name"),
+        )
+        suggestions = analyze_plan(result)
+        assert "expand" in _rule_ids(suggestions)
+
+
+class TestGenerateExplodeExample:
+    """
+    Example: explode() row multiplication
+    --------------------------------------
+    >>> df.select(F.explode("arr"))
+    """
+
+    def test_explode_detected(self, spark: SparkSession, employees: DataFrame):
+        from spark_plan_viz import analyze_plan
+
+        df = employees.withColumn("tags", F.array(F.lit("a"), F.lit("b"), F.lit("c")))
+        result = df.select("id", F.explode("tags").alias("tag"))
+        suggestions = analyze_plan(result)
+        assert "generate_explode" in _rule_ids(suggestions)
+
+
+class TestEmptyPartitionFiltersExample:
+    """
+    Example: partitioned table without partition pruning
+    ----------------------------------------------------
+    Reading a partitionBy table without filtering on the partition column
+    forces Spark to list and read every partition.
+    """
+
+    def test_empty_partition_filters_detected(
+        self, spark: SparkSession, employees: DataFrame
+    ):
+        from spark_plan_viz import analyze_plan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "emp_part")
+            employees.write.mode("overwrite").partitionBy("department").parquet(path)
+
+            result = spark.read.parquet(path)
+            suggestions = analyze_plan(result)
+            assert "empty_partition_filters" in _rule_ids(suggestions)
+
+    def test_partition_filter_avoids_warning(
+        self, spark: SparkSession, employees: DataFrame
+    ):
+        from spark_plan_viz import analyze_plan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "emp_part")
+            employees.write.mode("overwrite").partitionBy("department").parquet(path)
+
+            result = spark.read.parquet(path).filter(F.col("department") == "Sales")
+            suggestions = analyze_plan(result)
+            assert "empty_partition_filters" not in _rule_ids(suggestions)
 
 
 # ===================================================================

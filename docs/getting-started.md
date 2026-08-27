@@ -63,6 +63,8 @@ for s in suggestions:
 
 ## Next Steps
 
+- [Gallery](gallery.md) — runnable bad/fix examples for **every** rule
+- [`notebooks/example.ipynb`](https://github.com/montanarograziano/spark_plan_viz/blob/main/notebooks/example.ipynb) — interactive notebook covering all 19 rules
 - [Notebook Mode](usage/notebook-mode.md) — details on Jupyter integration
 - [File Mode](usage/file-mode.md) — export to standalone HTML
 - [Optimization Reference](optimization-reference/index.md) — what each rule detects

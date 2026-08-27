@@ -9,21 +9,25 @@ import pytest
 
 from spark_plan_viz._analyzer import _attach_suggestions, _build_context, analyze_plan
 from spark_plan_viz._rules import (
+    ALL_RULES,
     AnalysisContext,
     CoalesceRule,
     CrossJoinRule,
+    EmptyPartitionFiltersRule,
+    ExpandRule,
     ExpensiveCollectRule,
     FullTableScanRule,
+    GenerateExplodeRule,
     MissingBroadcastHintRule,
     NestedLoopJoinRule,
-    NonColumnarNoPushdownRule,
     NonColumnarFormatRule,
+    NonColumnarNoPushdownRule,
     PartitionCountRule,
     PythonUDFRule,
     RedundantShuffleRule,
     Severity,
-    SkewHintRule,
     SinglePartitionExchangeRule,
+    SkewHintRule,
     SortBeforeShuffleRule,
     Suggestion,
     UnnecessarySortRule,
@@ -257,6 +261,17 @@ class TestSortBeforeShuffleRule:
         results = self.rule.check(exchange, ctx)
         assert len(results) == 1
 
+    def test_detects_sort_behind_wholestage_codegen(self) -> None:
+        sort_node = _make_node(name="Sort", node_type="sort")
+        codegen = _make_node(
+            name="WholeStageCodegen", node_type="other", children=[sort_node]
+        )
+        exchange = _make_node(name="Exchange", node_type="shuffle", children=[codegen])
+        ctx = _ctx_for(exchange)
+        results = self.rule.check(exchange, ctx)
+        assert len(results) == 1
+        assert results[0].rule_id == "sort_before_shuffle"
+
     def test_skips_non_sort_child(self) -> None:
         filter_node = _make_node(name="Filter", node_type="filter")
         exchange = _make_node(
@@ -426,6 +441,115 @@ class TestSkewHintRule:
         ctx = _ctx_for(node)
         results = self.rule.check(node, ctx)
         assert len(results) == 0
+
+    def test_detects_aqe_skew_flag(self) -> None:
+        node = _make_node(
+            name="SortMergeJoin",
+            node_type="join",
+            description="SortMergeJoin [id#0], [id#1], Inner, true",
+            key_info={"join_type": "Inner", "is_skew": True},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+        assert results[0].rule_id == "skew_join"
+        assert results[0].severity == Severity.INFO
+
+
+class TestExpandRule:
+    rule = ExpandRule()
+
+    def test_detects_expand_node(self) -> None:
+        node = _make_node(
+            name="Expand",
+            node_type="expand",
+            description="Expand [[a, b, 0], [a, null, 1], [null, b, 2], [null, null, 3]], [a, b, gid]",
+            key_info={"expand_groups": 4},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+        assert results[0].rule_id == "expand"
+        assert results[0].severity == Severity.WARNING
+        assert "4x" in results[0].message
+
+    def test_skips_non_expand(self) -> None:
+        node = _make_node(name="Project", node_type="project")
+        ctx = _ctx_for(node)
+        assert self.rule.check(node, ctx) == []
+
+
+class TestGenerateExplodeRule:
+    rule = GenerateExplodeRule()
+
+    def test_detects_explode(self) -> None:
+        node = _make_node(
+            name="Generate",
+            node_type="generate",
+            description="Generate explode(arr#1), [id#0], false, [x#2]",
+            key_info={"generator": "explode"},
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+        assert results[0].rule_id == "generate_explode"
+        assert "explode" in results[0].title.lower()
+
+    def test_detects_posexplode_from_description(self) -> None:
+        node = _make_node(
+            name="Generate",
+            node_type="generate",
+            description="Generate posexplode(arr#1), false, [pos#2, col#3]",
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+
+    def test_skips_non_generate(self) -> None:
+        node = _make_node(name="Project", node_type="project")
+        ctx = _ctx_for(node)
+        assert self.rule.check(node, ctx) == []
+
+
+class TestEmptyPartitionFiltersRule:
+    rule = EmptyPartitionFiltersRule()
+
+    def test_detects_empty_partition_filters(self) -> None:
+        node = _make_node(
+            name="FileScan parquet",
+            node_type="scan",
+            key_info={
+                "format": "PARQUET",
+                "has_partition_columns": True,
+                "partition_filters": [],
+            },
+        )
+        ctx = _ctx_for(node)
+        results = self.rule.check(node, ctx)
+        assert len(results) == 1
+        assert results[0].rule_id == "empty_partition_filters"
+
+    def test_skips_when_partition_filters_present(self) -> None:
+        node = _make_node(
+            name="FileScan parquet",
+            node_type="scan",
+            key_info={
+                "format": "PARQUET",
+                "has_partition_columns": True,
+                "partition_filters": ["(p = 0)"],
+            },
+        )
+        ctx = _ctx_for(node)
+        assert self.rule.check(node, ctx) == []
+
+    def test_skips_non_partitioned_scan(self) -> None:
+        node = _make_node(
+            name="FileScan parquet",
+            node_type="scan",
+            key_info={"format": "PARQUET", "partition_filters": []},
+        )
+        ctx = _ctx_for(node)
+        assert self.rule.check(node, ctx) == []
 
 
 class TestWindowWithoutPartitionRule:
@@ -655,3 +779,22 @@ class TestSuggestionSerialization:
         assert d["severity"] == "warning"
         assert d["rule_id"] == "test"
         assert d["title"] == "Test Title"
+
+
+class TestRuleRegistry:
+    def test_all_rules_registered(self) -> None:
+        # 15 original + expand, generate_explode, empty_partition_filters, skew_join
+        assert len(ALL_RULES) >= 18
+        rule_ids = {
+            s.rule_id
+            for rule in ALL_RULES
+            for s in rule.check(
+                _make_node(
+                    name="CartesianProduct",
+                    node_type="join",
+                    key_info={"join_type": "Cross"},
+                ),
+                AnalysisContext(),
+            )
+        }
+        assert "cross_join" in rule_ids

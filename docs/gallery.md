@@ -3,6 +3,10 @@
 Complete, runnable examples showing every optimization rule in action.
 Each section shows a **bad pattern** (triggers the rule) and a **fix**.
 
+The same gallery lives as a Jupyter notebook at
+[`notebooks/example.ipynb`](https://github.com/montanarograziano/spark_plan_viz/blob/main/notebooks/example.ipynb)
+— open it after `uv sync --all-groups` for interactive `visualize_plan` output.
+
 All examples assume this setup:
 
 ```python
@@ -92,6 +96,57 @@ visualize_plan(result)
 
 ---
 
+## Warning: Expand (CUBE / multiple COUNT DISTINCT)
+
+```python
+# BAD — triggers expand rule (WARNING): each row is multiplied by grouping sets
+result = employees.cube("department", "age").count()
+visualize_plan(result)
+
+# Also triggers expand — multiple COUNT DISTINCT
+result = employees.groupBy("department").agg(
+    F.countDistinct("id"),
+    F.countDistinct("name"),
+)
+visualize_plan(result)
+```
+
+---
+
+## Warning: explode() Row Explosion
+
+```python
+# BAD — triggers generate_explode rule (WARNING)
+tagged = employees.withColumn("tags", F.array(F.lit("a"), F.lit("b")))
+result = tagged.select("id", F.explode("tags").alias("tag"))
+visualize_plan(result)
+
+# BETTER — project narrow columns before explode
+result = tagged.select("id", "tags").select("id", F.explode("tags").alias("tag"))
+visualize_plan(result)
+```
+
+---
+
+## Warning: No Partition Pruning
+
+```python
+import tempfile, os
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, "emp_part")
+    employees.write.mode("overwrite").partitionBy("department").parquet(path)
+
+    # BAD — PartitionFilters: [] reads every partition
+    result = spark.read.parquet(path)
+    visualize_plan(result)
+
+    # FIX — filter on the partition column
+    result = spark.read.parquet(path).filter(F.col("department") == "Sales")
+    visualize_plan(result)
+```
+
+---
+
 ## Warning: No Pushed Filters Detected
 
 Reading a table without pushed filters wastes I/O.
@@ -175,11 +230,50 @@ Back-to-back repartitions waste a full network shuffle.
 
 ```python
 # BAD — triggers redundant_shuffle rule (WARNING)
-result = employees.repartition(10, "department").repartition(5)
+# sortWithinPartitions keeps the first exchange from being elided
+result = (
+    employees.repartition(10, "department")
+    .sortWithinPartitions("department")
+    .repartition(5)
+)
 visualize_plan(result)
 
 # FIX — single repartition
 result = employees.repartition(10, "department")
+visualize_plan(result)
+```
+
+---
+
+## Warning: Sort Before Shuffle
+
+A Sort immediately under an Exchange is wasted — the shuffle destroys order.
+
+```python
+# BAD — triggers sort_before_shuffle rule (WARNING)
+result = employees.orderBy("salary").repartition(4)
+visualize_plan(result)
+
+# FIX — sort after the shuffle, or drop sort if order is not needed
+result = employees.repartition(4).sortWithinPartitions("salary")
+visualize_plan(result)
+```
+
+---
+
+## Warning: Extreme Partition Counts
+
+```python
+# BAD — triggers partition_count_low (WARNING)
+result = employees.repartition(1)
+visualize_plan(result)
+
+# BAD — triggers partition_count_high (WARNING)
+result = employees.repartition(20_000)
+visualize_plan(result)
+
+# BETTER
+result = employees.repartition(8)
 visualize_plan(result)
 ```
 
@@ -243,11 +337,83 @@ Global exchanges can serialize a stage onto one task.
 
 ```python
 # Triggers single_partition_exchange rule (WARNING)
+# (often together with window_without_partition)
 from pyspark.sql.window import Window
 
 window = Window.orderBy("id")
 result = employees.withColumn("rn", F.row_number().over(window))
 visualize_plan(result)
+```
+
+---
+
+## Info: Potentially Unnecessary Sort
+
+A Sort whose order is not consumed by SortMergeJoin / Window / TakeOrderedAndProject.
+(Spark often removes pure `orderBy → aggregate` sorts; `dropDuplicates` still keeps the Sort.)
+
+```python
+# BAD — triggers unnecessary_sort rule (INFO)
+result = employees.orderBy("salary").dropDuplicates(["department"])
+visualize_plan(result)
+
+# FIX — drop the unused orderBy
+result = employees.dropDuplicates(["department"])
+visualize_plan(result)
+```
+
+---
+
+## Info: AQE Skew Join Active
+
+`skew_join` is informational. It fires when Adaptive Query Execution has already
+marked a join with `isSkew=true` on the **runtime / final** plan. Tiny local
+DataFrames almost never produce that flag before an action runs on skewed keys.
+
+**How to see it in a real job**
+
+1. Enable AQE (`spark.sql.adaptive.enabled=true`, default since Spark 3.2).
+2. Join a large fact table to a dimension with a few very hot keys.
+3. Run an action, then inspect the **Final Plan** in the Spark UI SQL tab
+   (or re-call `visualize_plan` / `analyze_plan` on the completed query).
+4. Look for `SortMergeJoin …, true` / `isSkew=true` → `skew_join` (INFO).
+
+**What the finding looks like**
+
+```text
+[info] skew_join  AQE Skew Join Active
+  This join is marked as skew-optimized by Adaptive Query Execution...
+```
+
+If skew remains after AQE, salt hot keys or pre-aggregate the heavy side.
+
+---
+
+## New-rules combo (Expand + explode + partition miss)
+
+Stack the Spark 3.5/4 refresh rules in one workflow:
+
+```python
+import tempfile, os
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, "emp_part")
+    employees.write.mode("overwrite").partitionBy("department").parquet(path)
+
+    # 1) empty_partition_filters
+    scanned = spark.read.parquet(path)
+    visualize_plan(scanned)
+
+    # 2) generate_explode
+    exploded = (
+        scanned.withColumn("tags", F.array(F.lit("x"), F.lit("y")))
+        .select("id", "department", F.explode("tags").alias("tag"))
+    )
+    visualize_plan(exploded)
+
+    # 3) expand (cube)
+    cubed = exploded.cube("department", "tag").count()
+    visualize_plan(cubed)
 ```
 
 ---

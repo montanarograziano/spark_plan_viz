@@ -12,10 +12,13 @@ from spark_plan_viz._extractors import (
     _extract_aggregate_functions,
     _extract_build_side,
     _extract_data_format,
+    _extract_expand_projections,
     _extract_filter_condition,
+    _extract_generator_name,
     _extract_grouping_keys,
     _extract_join_condition,
     _extract_join_type,
+    _extract_partition_filters,
     _extract_pushed_filters,
     _extract_selected_columns,
     _extract_shuffle_info,
@@ -23,47 +26,64 @@ from spark_plan_viz._extractors import (
     _extract_table_name,
     _get_metric_values,
     _get_output_info,
+    _has_partition_columns,
     _is_broadcast_join,
+    _is_skew_join,
+    _iter_scala,
 )
 
 logger = logging.getLogger("spark_plan_viz")
 
+# Ordered (substring, type) pairs — first match wins.
+_NODE_TYPE_RULES: tuple[tuple[str, str], ...] = (
+    ("BroadcastExchange", "broadcast"),
+    ("AQEShuffleRead", "shuffle_read"),
+    ("CustomShuffleReader", "shuffle_read"),
+    ("Exchange", "shuffle"),
+    ("Shuffle", "shuffle"),
+    ("BatchScan", "scan"),
+    ("FileScan", "scan"),
+    ("Scan", "scan"),
+    ("Join", "join"),
+    ("CartesianProduct", "join"),
+    ("Filter", "filter"),
+    ("Aggregate", "aggregate"),
+    ("Expand", "expand"),
+    ("Generate", "generate"),
+    ("Sort", "sort"),
+    ("Project", "project"),
+    ("Window", "window"),
+    ("Union", "union"),
+    ("Range", "scan"),
+    ("LocalTableScan", "scan"),
+    ("InMemoryTableScan", "scan"),
+)
 
-def _walk_node(node: JavaObject) -> dict[str, Any]:
-    """Recursively walk a SparkPlan node and build a tree dict."""
-    name = node.nodeName()
 
-    description: str = ""
+def _classify_node_type(name: str) -> str:
+    """Map a Spark physical node name to a visualization/analysis category."""
+    for needle, node_type in _NODE_TYPE_RULES:
+        if needle in name:
+            return node_type
+    return "other"
+
+
+def _node_description(node: JavaObject) -> str:
+    """Best-effort verbose description of a SparkPlan node."""
     try:
-        description = node.verboseStringWithSuffix()
+        return str(node.verboseStringWithSuffix())
     except Exception:
         try:
-            description = node.simpleString()
+            return str(node.simpleString())
         except Exception:
-            description = node.toString()
+            try:
+                return str(node.toString())
+            except Exception:
+                return ""
 
-    # Categorize node for coloring
-    node_type = "other"
-    if "Exchange" in name or "Shuffle" in name:
-        node_type = "shuffle"
-    elif "Scan" in name or "BatchScan" in name or "FileScan" in name:
-        node_type = "scan"
-    elif "Join" in name:
-        node_type = "join"
-    elif "Filter" in name:
-        node_type = "filter"
-    elif "Aggregate" in name:
-        node_type = "aggregate"
-    elif "Sort" in name:
-        node_type = "sort"
-    elif "Project" in name:
-        node_type = "project"
-    elif "Window" in name:
-        node_type = "window"
-    elif "Union" in name:
-        node_type = "union"
 
-    # Extract specific information based on node type
+def _extract_key_info(name: str, node_type: str, description: str) -> dict[str, Any]:
+    """Populate type-specific key_info fields from a node description."""
     key_info: dict[str, Any] = {}
 
     if node_type == "join":
@@ -78,6 +98,8 @@ def _walk_node(node: JavaObject) -> dict[str, Any]:
             build_side = _extract_build_side(description)
             if build_side:
                 key_info["build_side"] = build_side
+        if _is_skew_join(description, name):
+            key_info["is_skew"] = True
 
     elif node_type == "filter":
         filter_cond = _extract_filter_condition(description)
@@ -107,16 +129,84 @@ def _walk_node(node: JavaObject) -> dict[str, Any]:
         pushed_filters = _extract_pushed_filters(description)
         if pushed_filters:
             key_info["pushed_filters"] = pushed_filters
+        partition_filters = _extract_partition_filters(description)
+        if partition_filters is not None:
+            key_info["partition_filters"] = partition_filters
+        if _has_partition_columns(description):
+            key_info["has_partition_columns"] = True
 
     elif node_type == "sort":
         sort_order = _extract_sort_order(description)
         if sort_order:
             key_info["order"] = sort_order
 
-    elif node_type == "shuffle":
+    elif node_type in {"shuffle", "shuffle_read", "broadcast"}:
         shuffle_info = _extract_shuffle_info(description)
         key_info.update(shuffle_info)
-        key_info["is_shuffle"] = True
+        if node_type == "shuffle":
+            key_info["is_shuffle"] = True
+        if node_type == "broadcast" or _is_broadcast_join(description, name):
+            key_info["is_broadcast"] = True
+
+    elif node_type == "generate":
+        generator = _extract_generator_name(description, name)
+        if generator:
+            key_info["generator"] = generator
+
+    elif node_type == "expand":
+        groups = _extract_expand_projections(description)
+        if groups is not None:
+            key_info["expand_groups"] = groups
+
+    return key_info
+
+
+def _child_plans(node: JavaObject, name: str) -> list[Any]:
+    """Resolve child SparkPlan nodes, including AQE wrappers (Spark 3/4)."""
+    children_nodes: list[Any] = []
+
+    if "AdaptiveSparkPlan" in name:
+        final_plan = node.executedPlan()
+        if final_plan:
+            children_nodes.append(final_plan)
+        return children_nodes
+
+    if "QueryStage" in name:
+        try:
+            stage_plan = node.plan()
+            if stage_plan:
+                children_nodes.append(stage_plan)
+                return children_nodes
+        except Exception:
+            pass
+
+    # Single-child AQE / reuse wrappers (Spark 3.2+ and 4.x)
+    single_child_wrappers = (
+        "ReusedExchange",
+        "AQEShuffleRead",
+        "CustomShuffleReader",
+        "InputAdapter",
+        "WholeStageCodegen",
+    )
+    if any(w in name for w in single_child_wrappers):
+        try:
+            child = node.child()
+            if child is not None:
+                children_nodes.append(child)
+                return children_nodes
+        except Exception:
+            pass
+
+    children_nodes.extend(_iter_scala(node.children()))
+    return children_nodes
+
+
+def _walk_node(node: JavaObject) -> dict[str, Any]:
+    """Recursively walk a SparkPlan node and build a tree dict."""
+    name = str(node.nodeName())
+    description = _node_description(node)
+    node_type = _classify_node_type(name)
+    key_info = _extract_key_info(name, node_type, description)
 
     data: dict[str, Any] = {
         "name": name,
@@ -129,31 +219,9 @@ def _walk_node(node: JavaObject) -> dict[str, Any]:
         "suggestions": [],
     }
 
-    # --- Spark 3+ AQE & Traversal Logic ---
-    children_nodes: list[Any] = []
-
     try:
-        if "AdaptiveSparkPlan" in name:
-            final_plan = node.executedPlan()
-            if final_plan:
-                children_nodes.append(final_plan)
-        elif "QueryStage" in name:
-            stage_plan = node.plan()
-            if stage_plan:
-                children_nodes.append(stage_plan)
-        elif "ReusedExchange" in name:
-            child = node.child()
-            if child:
-                children_nodes.append(child)
-        else:
-            children_seq = node.children()
-            iterator = children_seq.iterator()
-            while iterator.hasNext():
-                children_nodes.append(iterator.next())
-
-        for child in children_nodes:
+        for child in _child_plans(node, name):
             data["children"].append(_walk_node(child))
-
     except Exception:
         logger.debug("Error traversing children of node %s", name, exc_info=True)
 
@@ -163,7 +231,7 @@ def _walk_node(node: JavaObject) -> dict[str, Any]:
 def _parse_spark_plan(df: DataFrame) -> dict[str, Any] | None:
     """
     Traverse the internal JVM SparkPlan object using Py4J.
-    Designed for Spark 3.x+ with Adaptive Query Execution (AQE) support.
+    Designed for Spark 3.x / 4.x with Adaptive Query Execution (AQE) support.
     Returns a dictionary representing the tree structure.
     """
     try:

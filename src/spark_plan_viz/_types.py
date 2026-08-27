@@ -11,6 +11,7 @@ class KeyInfo(TypedDict, total=False):
     join_type: str
     condition: str
     is_broadcast: bool
+    is_skew: bool
     build_side: str
     columns: list[str]
     functions: list[str]
@@ -18,10 +19,16 @@ class KeyInfo(TypedDict, total=False):
     table: str
     format: str
     pushed_filters: list[str]
+    partition_filters: list[str]
+    has_partition_columns: bool
     order: str
     shuffle_type: str
     partitions: str
     is_shuffle: bool
+    aqe_coalesced: str
+    aqe_local_reader: str
+    generator: str
+    expand_groups: int
 
 
 class PlanNode(TypedDict):

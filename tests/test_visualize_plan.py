@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import os
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -17,528 +21,430 @@ try:
 except ImportError:
     PYSPARK_AVAILABLE = False
 
-JAVA_AVAILABLE = bool(os.environ.get("JAVA_HOME"))
-if JAVA_AVAILABLE:
-    JAVA_AVAILABLE = os.path.exists(
-        os.path.join(os.environ["JAVA_HOME"], "bin", "java")
-    )
+JAVA_AVAILABLE = bool(os.environ.get("JAVA_HOME")) and os.path.exists(
+    os.path.join(os.environ.get("JAVA_HOME", ""), "bin", "java")
+)
 
 
-# Helper classes for mocking Scala-like iterators
-class EmptyIterator:
-    """Mock iterator that returns no items."""
+class ScalaIterator:
+    """Mock of a Scala iterator exposing hasNext()/next() over a Python list."""
 
-    def hasNext(self) -> bool:
-        return False
-
-
-class ItemsIterator:
-    """Mock iterator that returns a list of items."""
-
-    def __init__(self, items: list) -> None:
-        self.items = items
+    def __init__(self, items: list[Any] | None = None) -> None:
+        self.items = items or []
         self.index = 0
 
     def hasNext(self) -> bool:
         return self.index < len(self.items)
 
-    def next(self) -> Mock:
+    def next(self) -> Any:
         item = self.items[self.index]
         self.index += 1
         return item
 
 
-class TestParseSparkPlan:
-    """Test the _parse_spark_plan function."""
+def _make_output_attr(value: str) -> Mock:
+    attr = Mock()
+    attr.toString = Mock(return_value=value)
+    return attr
 
-    def test_parse_spark_plan_invalid_dataframe(self) -> None:
-        """Test that invalid DataFrame returns None."""
-        invalid_df = Mock()
-        del invalid_df._jdf  # Remove the _jdf attribute
 
-        result = _parse_spark_plan(invalid_df)
-        assert result is None
+def _make_metric_entry(name: str, value: int) -> Mock:
+    metric_obj = Mock()
+    metric_obj.value = Mock(return_value=value)
+    entry = Mock()
+    entry._1 = Mock(return_value=name)
+    entry._2 = Mock(return_value=metric_obj)
+    return entry
 
-    def test_parse_spark_plan_basic_structure(self) -> None:
-        """Test parsing a simple plan structure."""
-        mock_df = Mock()
-        mock_plan = Mock()
-        mock_plan.nodeName.return_value = "Filter"
-        mock_plan.verboseStringWithSuffix.return_value = "Filter (id > 10)"
-        mock_plan.output.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.metrics.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.children.return_value.iterator.return_value = EmptyIterator()
 
-        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_plan
+@pytest.fixture
+def make_plan() -> Callable[..., Mock]:
+    """Factory fixture for building a mock Spark plan node."""
 
-        result = _parse_spark_plan(mock_df)
-
-        assert result is not None
-        assert result["name"] == "Filter"
-        assert result["description"] == "Filter (id > 10)"
-        assert result["type"] == "filter"
-        assert result["children"] == []
-
-    @pytest.mark.parametrize(
-        "node_name,expected_type",
-        [
-            ("Exchange", "shuffle"),
-            ("ShuffleExchange", "shuffle"),
-            ("FileScan", "scan"),
-            ("BatchScan", "scan"),
-            ("HashJoin", "join"),
-            ("Filter", "filter"),
-            ("HashAggregate", "aggregate"),
-            ("Sort", "sort"),
-            ("Project", "project"),
-            ("Window", "window"),
-            ("Union", "union"),
-            ("Unknown", "other"),
-        ],
-    )
-    def test_parse_spark_plan_node_types(
-        self, node_name: str, expected_type: str
-    ) -> None:
-        """Test that different node types are categorized correctly."""
-        mock_df = Mock()
-        mock_plan = Mock()
-        mock_plan.nodeName.return_value = node_name
-        mock_plan.verboseStringWithSuffix.return_value = f"{node_name} details"
-        mock_plan.output.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.metrics.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.children.return_value.iterator.return_value = EmptyIterator()
-
-        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_plan
-
-        result = _parse_spark_plan(mock_df)
-        assert result is not None
-        assert result["type"] == expected_type
-
-    def test_parse_spark_plan_with_metrics(self) -> None:
-        """Test parsing plan with metrics."""
-        mock_df = Mock()
-        mock_plan = Mock()
-        mock_plan.nodeName.return_value = "Scan"
-        mock_plan.verboseStringWithSuffix.return_value = "Scan table"
-
-        # Mock metrics
-        mock_metric_obj = Mock()
-        mock_metric_obj.value = Mock(return_value=1000)
-        mock_entry = Mock()
-        mock_entry._1 = Mock(return_value="numRows")
-        mock_entry._2 = Mock(return_value=mock_metric_obj)
-
-        mock_metrics = Mock()
-        mock_metrics.iterator.return_value = ItemsIterator([mock_entry])
-        mock_plan.metrics.return_value = mock_metrics
-
-        mock_plan.output.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.children.return_value.iterator.return_value = EmptyIterator()
-
-        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_plan
-
-        result = _parse_spark_plan(mock_df)
-
-        assert result is not None
-        assert "metrics" in result
-        assert result["metrics"]["numRows"] == 1000
-
-    def test_parse_spark_plan_with_output(self) -> None:
-        """Test parsing plan with output columns."""
-        mock_df = Mock()
-        mock_plan = Mock()
-        mock_plan.nodeName.return_value = "Project"
-        mock_plan.verboseStringWithSuffix.return_value = "Project [id, name]"
-
-        # Mock output attributes
-        mock_attr1 = Mock()
-        mock_attr1.toString = Mock(return_value="id#123")
-        mock_attr2 = Mock()
-        mock_attr2.toString = Mock(return_value="name#456")
-
-        mock_output = Mock()
-        mock_output.iterator.return_value = ItemsIterator([mock_attr1, mock_attr2])
-        mock_plan.output.return_value = mock_output
-
-        mock_plan.metrics.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.children.return_value.iterator.return_value = EmptyIterator()
-
-        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_plan
-
-        result = _parse_spark_plan(mock_df)
-
-        assert result is not None
-        assert result["output"] == ["id#123", "name#456"]
-
-    def test_parse_spark_plan_with_children(self) -> None:
-        """Test parsing plan with child nodes."""
-        mock_df = Mock()
-
-        # Child node
-        mock_child = Mock()
-        mock_child.nodeName = Mock(return_value="Scan")
-        mock_child.verboseStringWithSuffix = Mock(return_value="Scan table")
-        mock_child.output.return_value.iterator.return_value = EmptyIterator()
-        mock_child.metrics.return_value.iterator.return_value = EmptyIterator()
-        mock_child.children.return_value.iterator.return_value = EmptyIterator()
-
-        # Parent node
-        mock_parent = Mock()
-        mock_parent.nodeName = Mock(return_value="Join")
-        mock_parent.verboseStringWithSuffix = Mock(return_value="Join on id")
-        mock_parent.output.return_value.iterator.return_value = EmptyIterator()
-        mock_parent.metrics.return_value.iterator.return_value = EmptyIterator()
-        mock_parent.children.return_value.iterator.return_value = ItemsIterator(
-            [mock_child]
+    def _build(
+        name: str = "Filter",
+        description: str | None = None,
+        output: list[Mock] | None = None,
+        metrics: list[Mock] | None = None,
+        children: list[Mock] | None = None,
+        child: Mock | None = None,
+        executed_plan: Mock | None = None,
+    ) -> Mock:
+        plan = Mock()
+        plan.nodeName.return_value = name
+        plan.verboseStringWithSuffix.return_value = (
+            description if description is not None else f"{name} details"
         )
+        plan.output.return_value.iterator.return_value = ScalaIterator(output)
+        plan.metrics.return_value.iterator.return_value = ScalaIterator(metrics)
+        plan.children.return_value.iterator.return_value = ScalaIterator(children)
+        # AQE / single-child wrappers — default to no child so Mock doesn't recurse
+        plan.child.return_value = child
+        plan.executedPlan.return_value = executed_plan
+        plan.plan.return_value = child
+        return plan
 
-        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_parent
+    return _build
 
-        result = _parse_spark_plan(mock_df)
 
-        assert result is not None
-        assert len(result["children"]) == 1
-        assert result["children"][0]["name"] == "Scan"
+@pytest.fixture
+def make_df() -> Callable[[Mock], Mock]:
+    """Factory fixture wrapping a plan into a mock DataFrame."""
 
-    def test_parse_spark_plan_adaptive_spark_plan(self) -> None:
-        """Test parsing AdaptiveSparkPlan."""
-        mock_df = Mock()
-        mock_aqe = Mock()
-        mock_aqe.nodeName.return_value = "AdaptiveSparkPlan"
-        mock_aqe.verboseStringWithSuffix.return_value = "AQE enabled"
-        mock_aqe.output.return_value.iterator.return_value = iter([])
-        mock_aqe.metrics.return_value.iterator.return_value = iter([])
+    def _build(plan: Mock) -> Mock:
+        df = Mock()
+        df._jdf.queryExecution.return_value.executedPlan.return_value = plan
+        return df
 
-        # Mock executed plan
-        mock_executed = Mock()
-        mock_executed.nodeName.return_value = "Filter"
-        mock_executed.verboseStringWithSuffix.return_value = "Filter optimized"
-        mock_executed.output.return_value.iterator.return_value = iter([])
-        mock_executed.metrics.return_value.iterator.return_value = iter([])
-        mock_executed.children.return_value.iterator.return_value = iter([])
+    return _build
 
-        mock_aqe.executedPlan.return_value = mock_executed
 
-        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_aqe
+@pytest.fixture
+def sample_tree() -> dict[str, Any]:
+    return {
+        "name": "Root",
+        "description": "",
+        "type": "other",
+        "children": [],
+        "metrics": {},
+        "output": [],
+        "suggestions": [],
+    }
 
-        result = _parse_spark_plan(mock_df)
 
-        assert result is not None
-        assert result["name"] == "AdaptiveSparkPlan"
-        assert len(result["children"]) == 1
-        assert result["children"][0]["name"] == "Filter"
+# --- _parse_spark_plan -------------------------------------------------------
 
-    def test_parse_spark_plan_has_suggestions_field(self) -> None:
-        """Test that parsed nodes include a suggestions field."""
-        mock_df = Mock()
-        mock_plan = Mock()
-        mock_plan.nodeName.return_value = "Filter"
-        mock_plan.verboseStringWithSuffix.return_value = "Filter (id > 10)"
-        mock_plan.output.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.metrics.return_value.iterator.return_value = EmptyIterator()
-        mock_plan.children.return_value.iterator.return_value = EmptyIterator()
 
-        mock_df._jdf.queryExecution.return_value.executedPlan.return_value = mock_plan
+def test_parse_spark_plan_invalid_dataframe() -> None:
+    invalid_df = Mock()
+    del invalid_df._jdf
+    assert _parse_spark_plan(invalid_df) is None
 
-        result = _parse_spark_plan(mock_df)
-        assert result is not None
-        assert "suggestions" in result
-        assert result["suggestions"] == []
+
+def test_parse_spark_plan_basic_structure(
+    make_plan: Callable[..., Mock], make_df: Callable[[Mock], Mock]
+) -> None:
+    df = make_df(make_plan(name="Filter", description="Filter (id > 10)"))
+
+    result = _parse_spark_plan(df)
+
+    assert result is not None
+    assert result["name"] == "Filter"
+    assert result["description"] == "Filter (id > 10)"
+    assert result["type"] == "filter"
+    assert result["children"] == []
+
+
+@pytest.mark.parametrize(
+    "node_name,expected_type",
+    [
+        ("Exchange", "shuffle"),
+        ("ShuffleExchange", "shuffle"),
+        ("BroadcastExchange", "broadcast"),
+        ("AQEShuffleRead", "shuffle_read"),
+        ("CustomShuffleReader", "shuffle_read"),
+        ("FileScan", "scan"),
+        ("BatchScan", "scan"),
+        ("HashJoin", "join"),
+        ("Filter", "filter"),
+        ("HashAggregate", "aggregate"),
+        ("Expand", "expand"),
+        ("Generate", "generate"),
+        ("Sort", "sort"),
+        ("Project", "project"),
+        ("Window", "window"),
+        ("Union", "union"),
+        ("Unknown", "other"),
+    ],
+)
+def test_parse_spark_plan_node_types(
+    node_name: str,
+    expected_type: str,
+    make_plan: Callable[..., Mock],
+    make_df: Callable[[Mock], Mock],
+) -> None:
+    df = make_df(make_plan(name=node_name))
+    result = _parse_spark_plan(df)
+
+    assert result is not None
+    assert result["type"] == expected_type
+
+
+def test_parse_spark_plan_expand_and_scan_key_info(
+    make_plan: Callable[..., Mock], make_df: Callable[[Mock], Mock]
+) -> None:
+    expand = make_plan(
+        name="Expand",
+        description=(
+            "Expand [[a#1, b#2, 0], [a#1, null, 1], [null, b#2, 2], [null, null, 3]], "
+            "[a#3, b#4, spark_grouping_id#5]"
+        ),
+    )
+    result = _parse_spark_plan(make_df(expand))
+    assert result is not None
+    assert result["type"] == "expand"
+    assert result["key_info"].get("expand_groups") == 4
+
+    scan_desc = (
+        "FileScan parquet [id#67L,p#68] Batched: true, DataFilters: [], "
+        "Format: Parquet, Location: InMemoryFileIndex(1 paths)[file:/tmp/t], "
+        "PartitionFilters: [], PushedFilters: [], ReadSchema: struct<id:bigint>"
+    )
+    scan = make_plan(name="FileScan parquet", description=scan_desc)
+    scan_result = _parse_spark_plan(make_df(scan))
+    assert scan_result is not None
+    assert scan_result["key_info"].get("format") == "PARQUET"
+    assert scan_result["key_info"].get("has_partition_columns") is True
+    assert scan_result["key_info"].get("partition_filters") == []
+
+
+def test_parse_spark_plan_with_metrics(
+    make_plan: Callable[..., Mock], make_df: Callable[[Mock], Mock]
+) -> None:
+    df = make_df(make_plan(name="Scan", metrics=[_make_metric_entry("numRows", 1000)]))
+
+    result = _parse_spark_plan(df)
+
+    assert result is not None
+    assert result["metrics"] == {"numRows": 1000}
+
+
+def test_parse_spark_plan_with_output(
+    make_plan: Callable[..., Mock], make_df: Callable[[Mock], Mock]
+) -> None:
+    df = make_df(
+        make_plan(
+            name="Project",
+            output=[_make_output_attr("id#123"), _make_output_attr("name#456")],
+        )
+    )
+
+    result = _parse_spark_plan(df)
+
+    assert result is not None
+    assert result["output"] == ["id#123", "name#456"]
+
+
+def test_parse_spark_plan_with_children(
+    make_plan: Callable[..., Mock], make_df: Callable[[Mock], Mock]
+) -> None:
+    child = make_plan(name="Scan", description="Scan table")
+    df = make_df(make_plan(name="Join", description="Join on id", children=[child]))
+
+    result = _parse_spark_plan(df)
+
+    assert result is not None
+    assert len(result["children"]) == 1
+    assert result["children"][0]["name"] == "Scan"
+
+
+def test_parse_spark_plan_adaptive_spark_plan(
+    make_plan: Callable[..., Mock], make_df: Callable[[Mock], Mock]
+) -> None:
+    executed = make_plan(name="Filter", description="Filter optimized")
+    aqe = make_plan(name="AdaptiveSparkPlan", description="AQE enabled")
+    aqe.executedPlan.return_value = executed
+
+    result = _parse_spark_plan(make_df(aqe))
+
+    assert result is not None
+    assert result["name"] == "AdaptiveSparkPlan"
+    assert len(result["children"]) == 1
+    assert result["children"][0]["name"] == "Filter"
+
+
+def test_parse_spark_plan_has_suggestions_field(
+    make_plan: Callable[..., Mock], make_df: Callable[[Mock], Mock]
+) -> None:
+    result = _parse_spark_plan(make_df(make_plan()))
+
+    assert result is not None
+    assert result["suggestions"] == []
+
+
+# --- package surface ---------------------------------------------------------
 
 
 def test_package_visualize_plan_remains_callable() -> None:
     assert callable(package_visualize_plan)
 
 
-class TestBuildHtmlString:
-    """Test the _build_html_string function."""
-
-    @pytest.mark.parametrize(
-        "tree_data,expected_content",
-        [
-            (
-                {
-                    "name": "Filter",
-                    "description": "Filter (id > 10)",
-                    "type": "filter",
-                    "children": [],
-                    "metrics": {},
-                    "output": [],
-                    "suggestions": [],
-                },
-                ["<!DOCTYPE html>", "Spark Physical Plan", "d3.v7.min.js", "Filter"],
-            ),
-            (
-                {
-                    "name": "TestNode",
-                    "description": "Test Description",
-                    "type": "other",
-                    "children": [],
-                    "metrics": {"rows": 100},
-                    "output": ["col1", "col2"],
-                    "suggestions": [],
-                },
-                ["<!DOCTYPE html>", "Spark Physical Plan", "d3.v7.min.js"],
-            ),
-        ],
-    )
-    def test_build_html_structure_and_data(
-        self, tree_data: dict, expected_content: list[str]
-    ) -> None:
-        """Test that HTML is generated with correct structure and embedded data."""
-        html = _build_html_string(tree_data)
-
-        for content in expected_content:
-            assert content in html
-
-    def test_build_html_has_d3_visualization(self) -> None:
-        """Test that HTML contains D3.js visualization elements."""
-        tree_data = {
-            "name": "Root",
-            "description": "",
-            "type": "other",
-            "children": [],
-            "metrics": {},
-            "output": [],
-            "suggestions": [],
-        }
-
-        html = _build_html_string(tree_data)
-
-        required_elements = [
-            "d3.select",
-            "tree-container",
-            "details-panel",
-            "zoomIn",
-            "zoomOut",
-        ]
-        for element in required_elements:
-            assert element in html
-
-    def test_build_html_xss_escaping(self) -> None:
-        """Test that </script> in data does not break the template."""
-        tree_data = {
-            "name": "Root",
-            "description": '</script><script>alert("xss")</script>',
-            "type": "other",
-            "children": [],
-            "metrics": {},
-            "output": [],
-            "suggestions": [],
-        }
-
-        html = _build_html_string(tree_data)
-
-        # The raw </script> must NOT appear unescaped in the JSON blob
-        # (it would prematurely close the script tag)
-        assert "</script><script>alert" not in html
-        # The escaped form should be present
-        assert "<\\/script>" in html
-
-    def test_build_html_has_suggestions_panel(self) -> None:
-        """Test that HTML contains the suggestions panel."""
-        tree_data = {
-            "name": "Root",
-            "description": "",
-            "type": "other",
-            "children": [],
-            "metrics": {},
-            "output": [],
-            "suggestions": [],
-        }
-
-        html = _build_html_string(tree_data)
-        assert "suggestions-panel" in html
-        assert "escapeHtml" in html
+# --- _build_html_string ------------------------------------------------------
 
 
-class TestVisualizePlan:
-    """Test the visualize_plan function."""
+@pytest.mark.parametrize(
+    "tree_overrides,expected_content",
+    [
+        (
+            {"name": "Filter", "description": "Filter (id > 10)", "type": "filter"},
+            ["<!DOCTYPE html>", "Spark Physical Plan", "d3.v7.min.js", "Filter"],
+        ),
+        (
+            {
+                "name": "TestNode",
+                "description": "Test Description",
+                "metrics": {"rows": 100},
+                "output": ["col1", "col2"],
+            },
+            ["<!DOCTYPE html>", "Spark Physical Plan", "d3.v7.min.js"],
+        ),
+    ],
+)
+def test_build_html_structure_and_data(
+    sample_tree: dict[str, Any],
+    tree_overrides: dict[str, Any],
+    expected_content: list[str],
+) -> None:
+    html = _build_html_string({**sample_tree, **tree_overrides})
 
-    @patch("spark_plan_viz._renderer._parse_spark_plan")
-    @patch("IPython.display.display")
-    @patch("IPython.display.IFrame")
-    def test_visualize_plan_notebook_mode(
-        self, mock_iframe: Mock, mock_display: Mock, mock_parse: Mock
-    ) -> None:
-        """Test notebook mode displays inline."""
-        mock_df = Mock()
-        mock_tree = {
-            "name": "Test",
-            "description": "",
-            "type": "other",
-            "children": [],
-            "metrics": {},
-            "output": [],
-            "suggestions": [],
-        }
-        mock_parse.return_value = mock_tree
+    for content in expected_content:
+        assert content in html
 
-        result = visualize_plan(mock_df, notebook=True, analyze=False)
 
-        mock_parse.assert_called_once_with(mock_df)
-        mock_display.assert_called_once()
-        mock_iframe.assert_called_once()
-        assert result is not None
-        assert result["name"] == "Test"
+@pytest.mark.parametrize(
+    "expected_element",
+    [
+        "d3.select",
+        "tree-container",
+        "details-panel",
+        "zoomIn",
+        "zoomOut",
+        "suggestions-panel",
+        "escapeHtml",
+    ],
+)
+def test_build_html_contains_ui_element(
+    sample_tree: dict[str, Any], expected_element: str
+) -> None:
+    assert expected_element in _build_html_string(sample_tree)
 
-    @patch("spark_plan_viz._renderer._parse_spark_plan")
-    @patch("spark_plan_viz._renderer.webbrowser.open")
-    @patch("builtins.open", create=True)
-    def test_visualize_plan_file_mode(
-        self, mock_open: Mock, mock_browser: Mock, mock_parse: Mock
-    ) -> None:
-        """Test file mode saves and opens in browser."""
-        mock_df = Mock()
-        mock_tree = {
-            "name": "Test",
-            "description": "",
-            "type": "other",
-            "children": [],
-            "metrics": {},
-            "output": [],
-            "suggestions": [],
-        }
-        mock_parse.return_value = mock_tree
 
+def test_build_html_xss_escaping(sample_tree: dict[str, Any]) -> None:
+    tree = {
+        **sample_tree,
+        "description": '</script><script>alert("xss")</script>',
+    }
+
+    html = _build_html_string(tree)
+
+    assert "</script><script>alert" not in html
+    assert "<\\/script>" in html
+
+
+# --- visualize_plan ----------------------------------------------------------
+
+
+def test_visualize_plan_notebook_mode(sample_tree: dict[str, Any]) -> None:
+    with (
+        patch("spark_plan_viz._renderer._parse_spark_plan", return_value=sample_tree),
+        patch("IPython.display.display") as mock_display,
+        patch("IPython.display.IFrame") as mock_iframe,
+    ):
+        result = visualize_plan(Mock(), notebook=True, analyze=False)
+
+    mock_display.assert_called_once()
+    mock_iframe.assert_called_once()
+    assert result == sample_tree
+
+
+def test_visualize_plan_file_mode(sample_tree: dict[str, Any]) -> None:
+    with (
+        patch("spark_plan_viz._renderer._parse_spark_plan", return_value=sample_tree),
+        patch("spark_plan_viz._renderer.webbrowser.open") as mock_browser,
+        patch("builtins.open", create=True) as mock_open,
+    ):
         result = visualize_plan(
-            mock_df, notebook=False, output_file="test.html", analyze=False
+            Mock(), notebook=False, output_file="test.html", analyze=False
         )
 
-        mock_parse.assert_called_once_with(mock_df)
-        mock_open.assert_called_once()
-        mock_browser.assert_called_once()
-        assert result is not None
+    mock_open.assert_called_once()
+    mock_browser.assert_called_once()
+    assert result is not None
 
-    @patch("spark_plan_viz._renderer._parse_spark_plan")
-    @patch("spark_plan_viz._renderer.webbrowser.open")
-    @patch("builtins.open", create=True)
-    def test_visualize_plan_file_mode_without_browser(
-        self, mock_open: Mock, mock_browser: Mock, mock_parse: Mock
-    ) -> None:
-        """Test file mode can skip opening the browser."""
-        mock_df = Mock()
-        mock_tree = {
-            "name": "Test",
-            "description": "",
-            "type": "other",
-            "children": [],
-            "metrics": {},
-            "output": [],
-            "suggestions": [],
-        }
-        mock_parse.return_value = mock_tree
 
+def test_visualize_plan_file_mode_without_browser(sample_tree: dict[str, Any]) -> None:
+    with (
+        patch("spark_plan_viz._renderer._parse_spark_plan", return_value=sample_tree),
+        patch("spark_plan_viz._renderer.webbrowser.open") as mock_browser,
+        patch("builtins.open", create=True) as mock_open,
+    ):
         result = visualize_plan(
-            mock_df,
+            Mock(),
             notebook=False,
             output_file="test.html",
             analyze=False,
             open_browser=False,
         )
 
-        mock_parse.assert_called_once_with(mock_df)
-        mock_open.assert_called_once()
-        mock_browser.assert_not_called()
-        assert result is not None
+    mock_open.assert_called_once()
+    mock_browser.assert_not_called()
+    assert result is not None
 
-    @patch("spark_plan_viz._renderer._parse_spark_plan")
-    def test_visualize_plan_parse_failure(self, mock_parse: Mock) -> None:
-        """Test that function handles parse failure gracefully."""
-        mock_df = Mock()
-        mock_parse.return_value = None
 
-        result = visualize_plan(mock_df, notebook=True)
+def test_visualize_plan_parse_failure() -> None:
+    with patch("spark_plan_viz._renderer._parse_spark_plan", return_value=None):
+        assert visualize_plan(Mock(), notebook=True) is None
 
-        mock_parse.assert_called_once_with(mock_df)
-        assert result is None
 
-    @patch("spark_plan_viz._renderer._parse_spark_plan")
-    def test_visualize_plan_notebook_no_ipython(self, mock_parse: Mock) -> None:
-        """Test notebook mode handles missing IPython gracefully."""
-        import builtins
+def test_visualize_plan_notebook_no_ipython(sample_tree: dict[str, Any]) -> None:
+    import builtins
 
-        mock_df = Mock()
-        mock_tree = {
-            "name": "Test",
-            "description": "",
-            "type": "other",
-            "children": [],
-            "metrics": {},
-            "output": [],
-            "suggestions": [],
-        }
-        mock_parse.return_value = mock_tree
+    original_import = builtins.__import__
 
-        original_import = builtins.__import__
+    def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "IPython.display":
+            raise ImportError("IPython not available")
+        return original_import(name, *args, **kwargs)
 
-        def mock_import(name: str, *args, **kwargs):
-            if name == "IPython.display":
-                raise ImportError("IPython not available")
-            return original_import(name, *args, **kwargs)
+    with (
+        patch("spark_plan_viz._renderer._parse_spark_plan", return_value=sample_tree),
+        patch("builtins.__import__", side_effect=mock_import),
+    ):
+        result = visualize_plan(Mock(), notebook=True, analyze=False)
 
-        with patch("builtins.__import__", side_effect=mock_import):
-            result = visualize_plan(mock_df, notebook=True, analyze=False)
+    assert result is not None
 
-        mock_parse.assert_called_once_with(mock_df)
-        assert result is not None
 
-    def test_visualize_plan_returns_tree(self) -> None:
-        """Test that visualize_plan returns the parsed tree data."""
-        with patch("spark_plan_viz._renderer._parse_spark_plan") as mock_parse:
-            mock_df = Mock()
-            mock_tree = {
-                "name": "Root",
-                "description": "",
-                "type": "other",
-                "children": [],
-                "metrics": {},
-                "output": [],
-                "suggestions": [],
-            }
-            mock_parse.return_value = mock_tree
+def test_visualize_plan_returns_tree(sample_tree: dict[str, Any]) -> None:
+    with (
+        patch("spark_plan_viz._renderer._parse_spark_plan", return_value=sample_tree),
+        patch("IPython.display.display"),
+        patch("IPython.display.IFrame"),
+    ):
+        result = visualize_plan(Mock(), notebook=True, analyze=False)
 
-            with patch("IPython.display.display"), patch("IPython.display.IFrame"):
-                result = visualize_plan(mock_df, notebook=True, analyze=False)
+    assert result == sample_tree
 
-            assert result == mock_tree
 
-    @pytest.mark.skipif(
-        not PYSPARK_AVAILABLE or not JAVA_AVAILABLE,
-        reason="PySpark not installed or Java not available",
-    )
-    def test_visualize_plan_real_dataframe(self) -> None:
-        """Integration test with a real PySpark DataFrame."""
-
-        spark = SparkSession.Builder().appName("SparkPlanVizTest").getOrCreate()
-        # Create sample data
-        employees_data = [
-            (1, "Alice", 34, "Engineering"),
-            (2, "Bob", 45, "Sales"),
-            (3, "Cathy", 29, "Engineering"),
-            (4, "David", 38, "Marketing"),
-            (5, "Eve", 42, "Sales"),
-        ]
-        employees_columns = ["id", "name", "age", "department"]
-        employees_df = spark.createDataFrame(employees_data, employees_columns)
-
-        salaries_data = [
-            (1, 95000),
-            (2, 85000),
-            (3, 78000),
-            (4, 72000),
-            (5, 88000),
-        ]
-        salaries_columns = ["emp_id", "salary"]
-        salaries_df = spark.createDataFrame(salaries_data, salaries_columns)
-
-        departments_data = [
-            ("Engineering", "Tech"),
-            ("Sales", "Business"),
-            ("Marketing", "Business"),
-        ]
-        departments_columns = ["dept_name", "division"]
-        departments_df = spark.createDataFrame(departments_data, departments_columns)
+@pytest.mark.skipif(
+    not PYSPARK_AVAILABLE or not JAVA_AVAILABLE,
+    reason="PySpark not installed or Java not available",
+)
+def test_visualize_plan_real_dataframe() -> None:
+    spark = SparkSession.Builder().appName("SparkPlanVizTest").getOrCreate()
+    try:
+        employees_df = spark.createDataFrame(
+            [
+                (1, "Alice", 34, "Engineering"),
+                (2, "Bob", 45, "Sales"),
+                (3, "Cathy", 29, "Engineering"),
+                (4, "David", 38, "Marketing"),
+                (5, "Eve", 42, "Sales"),
+            ],
+            ["id", "name", "age", "department"],
+        )
+        salaries_df = spark.createDataFrame(
+            [(1, 95000), (2, 85000), (3, 78000), (4, 72000), (5, 88000)],
+            ["emp_id", "salary"],
+        )
+        departments_df = spark.createDataFrame(
+            [
+                ("Engineering", "Tech"),
+                ("Sales", "Business"),
+                ("Marketing", "Business"),
+            ],
+            ["dept_name", "division"],
+        )
 
         result_df = (
             employees_df.filter(employees_df.age > 30)
@@ -554,10 +460,9 @@ class TestVisualizePlan:
             .sort("division")
         )
 
-        # This should not raise any exceptions and should return data
         result = visualize_plan(
             result_df, notebook=True, output_file="test_real_df.html"
         )
         assert result is not None
-
+    finally:
         spark.stop()
